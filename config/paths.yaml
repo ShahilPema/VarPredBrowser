@@ -1,0 +1,34 @@
+# VarPredBrowser Data Paths Configuration
+# Update these paths to match your environment
+
+data_sources:
+  # Variant-level scaled data (same columns in both: binary_presence_exomes_XX_XY, roulette_AR_MR_scaled_exomes_XX_XY)
+  rgc_scaled: "/storage/zoghbi/home/u235147/merged_vars/rgc_scaled.ht"
+  gnomad_scaled: "/storage/zoghbi/home/u235147/merged_vars/gnomadV4_scaled.ht"
+
+  # ML Predictions (Core, Complete, Constraint models)
+  predictions: "/local/Missense_Predictor_copy/Results/Inference/Predictions/AOU_RGC_All_preds.ht"
+
+  # Browser data (locus-level merged data for Gosling visualization)
+  browser_data: "/storage/zoghbi/home/u235147/merged_vars/rgc_browser_data_merged.parquet"
+
+  # ClinVar for pathogenic variant validation
+  clinvar: "/storage/zoghbi/data/sharing/hail_tables/cv_38_final.ht"
+
+  # Training labels
+  training_labels: "/local/Missense_Predictor_copy/_rgc_train_vars.csv"
+
+  # dbNSFP scores
+  dbnsfp: "/local/Missense_Predictor_copy/Data/dbnsfp/All_missense_with_impute_mane_select_final_with_perc_with_impute_con_perc.ht"
+
+  # gnomAD coverage
+  gnomad_exomes_coverage: "/storage/zoghbi/data/sharing/hail_tables/gnomadV4_exomes_coverage_struct.ht"
+  gnomad_genomes_coverage: "/storage/zoghbi/data/sharing/hail_tables/gnomadV3_coverage_struct.ht"
+
+hail:
+  cpus: 40
+  tmpdir: "/local/tmp"
+
+output:
+  curve_data: "output/curve_data"
+  figures: "output/figures"
