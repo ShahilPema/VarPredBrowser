@@ -1,10 +1,13 @@
 # VarPredBrowser Dependencies
+# Combined requirements for data processing + browser serving
 
-# Core data processing
+# ============================================================
+# Core Data Processing (Hail pipeline)
+# ============================================================
 hail>=0.2.134
 polars>=0.20.0
 pandas>=2.0.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0.0  # pyBigWig requires NumPy 1.x
 
 # Visualization
 matplotlib>=3.7.0
@@ -22,3 +25,18 @@ ipykernel>=6.0.0
 
 # Progress bars
 tqdm>=4.65.0
+
+# ============================================================
+# Browser Server (FastAPI)
+# ============================================================
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+
+# Data formats
+pyarrow>=14.0.1
+pybigwig>=0.3.22
+
+# HTTP client (for fetching AlphaFold structures)
+requests>=2.32.3

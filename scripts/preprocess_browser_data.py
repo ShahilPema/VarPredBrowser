@@ -14,15 +14,26 @@ Includes:
 - Constraint predictions
 - Percentiled constraint metrics
 - Domain annotations (array format)
+
+Usage:
+    python scripts/preprocess_browser_data.py [--input PATH] [--output PATH]
 """
 
+import argparse
 import polars as pl
 from pathlib import Path
 import sys
 
-# Configuration
-INPUT_PARQUET = '../rgc_browser_data_merged.parquet'
-OUTPUT_DIR = Path('data')
+# Try to import from browser config
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from browser.backend.config import get_config, get_data_dir
+    _config = get_config()
+    DEFAULT_INPUT = _config.get('data_sources', {}).get('browser_data', '../rgc_browser_data_merged.parquet')
+    DEFAULT_OUTPUT = get_data_dir()
+except ImportError:
+    DEFAULT_INPUT = '../rgc_browser_data_merged.parquet'
+    DEFAULT_OUTPUT = Path('data')
 
 # Filter definitions
 FILTERS = {
@@ -164,7 +175,7 @@ def get_columns_to_keep(df, chrom_col, pos_col, gene_col):
     }
 
 
-def process_filter(df, filter_id, filter_config, chrom_col, pos_col, gene_col, chrom_order_map):
+def process_filter(df, filter_id, filter_config, chrom_col, pos_col, gene_col, chrom_order_map, output_dir: Path):
     """Process a single filter and generate axis table + gene index."""
     print(f"\n{'='*60}")
     print(f"Processing filter: {filter_id}")
@@ -216,7 +227,7 @@ def process_filter(df, filter_id, filter_config, chrom_col, pos_col, gene_col, c
     axis_table = axis_table.rename(rename_map)
     
     # Save axis table
-    output_file = OUTPUT_DIR / f'{filter_id}.parquet'
+    output_file = output_dir / f'{filter_id}.parquet'
     print(f"\nSaving axis table...")
     axis_table.write_parquet(output_file)
     print(f"✓ Saved: {output_file}")
@@ -234,7 +245,7 @@ def process_filter(df, filter_id, filter_config, chrom_col, pos_col, gene_col, c
             pl.len().alias('num_positions')
         ]).sort('filtered_idx_start')
         
-        gene_output = OUTPUT_DIR / f'gene_index_{filter_id}.parquet'
+        gene_output = output_dir / f'gene_index_{filter_id}.parquet'
         gene_index.write_parquet(gene_output)
         print(f"✓ Saved: {gene_output}")
         print(f"  Genes: {len(gene_index):,}")
@@ -264,23 +275,27 @@ def process_filter(df, filter_id, filter_config, chrom_col, pos_col, gene_col, c
     }
 
 
-def main():
+def main(input_path: str = None, output_dir: str = None):
     print(f"{'='*60}")
-    print(f"COMPRESSED GENOME VIEWER - DATA PREPROCESSING")
+    print(f"VARPRED BROWSER - DATA PREPROCESSING")
     print(f"Generating axis tables for all filter modes")
     print(f"{'='*60}\n")
-    
+
+    # Use provided paths or defaults
+    input_parquet = Path(input_path) if input_path else Path(DEFAULT_INPUT)
+    output_path = Path(output_dir) if output_dir else DEFAULT_OUTPUT
+
     # Create output directory
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    
+    output_path.mkdir(parents=True, exist_ok=True)
+
     # Load parquet file
-    print(f"Loading data from {INPUT_PARQUET}...")
+    print(f"Loading data from {input_parquet}...")
     try:
-        df = pl.read_parquet(INPUT_PARQUET)
-        print(f"✓ Loaded {len(df):,} total positions")
+        df = pl.read_parquet(input_parquet)
+        print(f"Loaded {len(df):,} total positions")
         print(f"  Columns: {len(df.columns)}")
     except Exception as e:
-        print(f"✗ Error loading parquet: {e}")
+        print(f"Error loading parquet: {e}")
         sys.exit(1)
     
     # Detect column names
@@ -307,7 +322,7 @@ def main():
     for filter_id, filter_config in FILTERS.items():
         result = process_filter(
             df, filter_id, filter_config,
-            chrom_col, pos_col, gene_col, chrom_order_map
+            chrom_col, pos_col, gene_col, chrom_order_map, output_path
         )
         results.append(result)
     
@@ -324,9 +339,16 @@ def main():
         print(f"    - Genes: {result['genes']:,}")
         print()
     
-    print(f"Output directory: {OUTPUT_DIR.absolute()}")
+    print(f"Output directory: {output_path.absolute()}")
     print(f"{'='*60}")
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Preprocess browser data into axis tables')
+    parser.add_argument('--input', '-i', default=None,
+                        help='Input parquet file path (default: from config or ../rgc_browser_data_merged.parquet)')
+    parser.add_argument('--output', '-o', default=None,
+                        help='Output directory (default: from config or data/)')
+
+    args = parser.parse_args()
+    main(input_path=args.input, output_dir=args.output)

@@ -32,3 +32,18 @@ hail:
 output:
   curve_data: "output/curve_data"
   figures: "output/figures"
+
+# Browser server configuration
+browser:
+  # Directory for processed browser data (axis tables, gene indexes)
+  data_dir: "data"
+
+  # BigWig files directory (optional, for external tracks)
+  bigwig_dir: "../GenomeBrowser2/test_data/BW"
+
+  # Structures directory for protein PDB files
+  structures_dir: "data/structures"
+
+  # Server settings
+  host: "0.0.0.0"
+  port: 8000
