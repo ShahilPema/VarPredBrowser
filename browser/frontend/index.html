@@ -1857,6 +1857,11 @@
             return trackId === 'Constraint' || trackId === 'Core' || trackId === 'Complete';
         }
 
+        // Determine if track is a dbNSFP stacked track
+        function isDbNSFPStackedTrack(trackId) {
+            return trackId === 'AlphaMissense_stacked' || trackId === 'ESM1b_stacked';
+        }
+
         // Determine if track is any ClinVar track
         function isClinVarTrack(trackId) {
             return trackId.startsWith('clinvar.');
@@ -1926,6 +1931,43 @@
         const CLINVAR_COLORS = Object.fromEntries(
             Object.entries(CLINVAR_LABELS).map(([k, v]) => [k, v.color])
         );
+
+        // Variant consequence categories for filtering constraint predictions
+        // Categories: plof, missense, synonymous, other
+        const CONSEQUENCE_CATEGORIES = {
+            'plof': { abbrev: 'pLoF', color: '#d62728', description: 'Predicted Loss of Function' },
+            'missense': { abbrev: 'Missense', color: '#ff7f0e', description: 'Missense variants' },
+            'synonymous': { abbrev: 'Synonymous', color: '#2ca02c', description: 'Synonymous variants' },
+            'other': { abbrev: 'Other', color: '#7f7f7f', description: 'Other consequence types' }
+        };
+
+        // Consequence filter state - which categories to show (all enabled by default)
+        let consequenceFilter = {
+            'plof': true,
+            'missense': true,
+            'synonymous': true,
+            'other': true
+        };
+
+        // Check if a consequence category passes the current filter
+        function consequencePassesFilter(csqCategory) {
+            if (!csqCategory) return true;  // If no category, show by default
+            return consequenceFilter[csqCategory] !== false;
+        }
+
+        // Get consequence for an allele at a position from positionsData
+        function getConsequenceForAllele(positionData, allele) {
+            const csqArray = positionData['variant_consequences'];
+            if (!csqArray || !Array.isArray(csqArray)) return null;
+
+            // Find the consequence for this allele
+            for (const csq of csqArray) {
+                if (csq && csq._0 === allele) {
+                    return csq._1;  // Return the consequence category
+                }
+            }
+            return null;
+        }
 
         function getClinVarColor(label) {
             // Try exact match first
@@ -2061,6 +2103,38 @@
                             clinvarLabelFilter[labelKey] = e.target.checked;
                             // Re-render if ClinVar track is selected
                             if (selectedTracks.includes('clinvar.clinvar_label_list')) {
+                                renderChart();
+                            }
+                        });
+                    });
+                    childrenEl.appendChild(filterContainer);
+                }
+
+                // Special handling for Constraint Predictions node - add consequence filter checkboxes
+                if (node.label === 'Constraint Predictions') {
+                    const filterContainer = document.createElement('div');
+                    filterContainer.className = 'clinvar-filter-container';
+                    filterContainer.innerHTML = `
+                        <div class="clinvar-filter-header">Filter by consequence:</div>
+                        <div class="clinvar-filter-options">
+                            ${Object.entries(consequenceFilter).map(([csqKey, enabled]) => {
+                                const info = CONSEQUENCE_CATEGORIES[csqKey] || { abbrev: csqKey, color: '#666' };
+                                return `
+                                    <label class="clinvar-filter-option" style="border-left: 3px solid ${info.color};" title="${info.description || ''}">
+                                        <input type="checkbox" data-consequence="${csqKey}" ${enabled ? 'checked' : ''}>
+                                        <span>${info.abbrev}</span>
+                                    </label>
+                                `;
+                            }).join('')}
+                        </div>
+                    `;
+                    filterContainer.addEventListener('click', (e) => e.stopPropagation());
+                    filterContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                        cb.addEventListener('change', (e) => {
+                            const csqKey = e.target.dataset.consequence;
+                            consequenceFilter[csqKey] = e.target.checked;
+                            // Re-render if any constraint track is selected
+                            if (selectedTracks.some(t => isConstraintStackedTrack(t))) {
                                 renderChart();
                             }
                         });
@@ -2523,8 +2597,64 @@
                     });
                 });
             }
+
+            // Draw dbNSFP stacked bars (AlphaMissense, ESM1b)
+            drawDbNSFPStacked(variantData, xScale, colorScale, barWidth, scoreRange) {
+                this.clear();
+                const ctx = this.ctx;
+                const barHeight = this.height - 15;
+                const [minScore, maxScore] = scoreRange;
+
+                // Normalize score to 0-1 range for color mapping
+                const normalizeScore = (score) => {
+                    if (minScore === maxScore) return 0.5;
+                    return (score - minScore) / (maxScore - minScore);
+                };
+
+                variantData.forEach((d, i) => {
+                    const x = xScale(d.filtered_idx);
+
+                    if (!d.variants || d.variants.length === 0) {
+                        // No variant data - draw gray bar
+                        ctx.fillStyle = '#555555';
+                        ctx.fillRect(x, 5, Math.ceil(Math.max(1, barWidth)) + 0.5, barHeight);
+                        return;
+                    }
+
+                    // Variants are already sorted by score value (lowest to highest)
+                    const variants = d.variants;
+
+                    // Scale factor: map scores to pixel height
+                    // Max expected ~3 variants, each gets equal height
+                    const maxDisplay = 3.0;
+                    const scaleFactor = barHeight / maxDisplay;
+
+                    let currentY = 5 + barHeight;  // Start from bottom
+
+                    variants.forEach(variant => {
+                        // Each variant gets a fixed height segment
+                        const segmentHeight = scaleFactor;
+                        const segmentTop = currentY - segmentHeight;
+
+                        // Color based on normalized score
+                        const normalizedScore = normalizeScore(variant.score);
+                        ctx.fillStyle = colorScale(normalizedScore);
+                        ctx.fillRect(x, segmentTop, Math.ceil(Math.max(1, barWidth)) + 0.5, segmentHeight);
+
+                        // Draw divider line between variants
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = 0.5;
+                        ctx.beginPath();
+                        ctx.moveTo(x, segmentTop);
+                        ctx.lineTo(x + Math.ceil(Math.max(1, barWidth)) + 0.5, segmentTop);
+                        ctx.stroke();
+
+                        currentY = segmentTop;
+                    });
+                });
+            }
         }
-        
+
         // Main render function with zoom support (Canvas-based)
         function renderChart() {
             const container = document.getElementById('chart-container');
@@ -2626,30 +2756,71 @@
                 const isClinVar = isClinVarTrack(trackId);
                 const isTraining = isTrainingTrack(trackId);
                 const isConstraintStacked = isConstraintStackedTrack(trackId);
+                const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
 
                 // Get values for this track
                 let values;
                 if (isConstraintStacked) {
                     // Constraint tracks: extract variant data from positionsData
+                    // Apply consequence filter if variant_consequences data is available
                     values = positionsData.map(d => {
                         const variantArray = d[trackId];
                         if (!variantArray || !Array.isArray(variantArray)) {
                             return { filtered_idx: d.filtered_idx, variants: [] };
                         }
 
-                        // Extract variants from the array
+                        // Extract variants from the array, filtering by consequence
                         const variants = [];
                         for (const v of variantArray) {
                             if (v && v._0 && v._1 !== null && v._1 !== undefined) {
+                                const allele = v._0;
+                                const pred = v._1;
+
+                                // Look up consequence for this allele
+                                const csq = getConsequenceForAllele(d, allele);
+
+                                // Check if this variant passes the consequence filter
+                                if (!consequencePassesFilter(csq)) {
+                                    continue;  // Skip variants that don't pass filter
+                                }
+
                                 variants.push({
-                                    allele: v._0,
-                                    pred: v._1
+                                    allele: allele,
+                                    pred: pred,
+                                    consequence: csq  // Store consequence for tooltip/coloring
                                 });
                             }
                         }
 
                         // Sort by pred value (lowest to highest)
                         variants.sort((a, b) => a.pred - b.pred);
+
+                        return {
+                            filtered_idx: d.filtered_idx,
+                            variants: variants
+                        };
+                    });
+                } else if (isDbNSFPStacked) {
+                    // dbNSFP stacked tracks: extract variant data with score and percentile
+                    values = positionsData.map(d => {
+                        const variantArray = d[trackId];
+                        if (!variantArray || !Array.isArray(variantArray)) {
+                            return { filtered_idx: d.filtered_idx, variants: [] };
+                        }
+
+                        const variants = [];
+                        for (const v of variantArray) {
+                            if (v && v._0 && v._1 !== null && v._1 !== undefined) {
+                                variants.push({
+                                    allele: v._0,
+                                    score: v._1,
+                                    percentile: v._2 || null
+                                });
+                            }
+                        }
+
+                        // Sort by score value (lowest to highest)
+                        variants.sort((a, b) => a.score - b.score);
 
                         return {
                             filtered_idx: d.filtered_idx,
@@ -2712,6 +2883,14 @@
                         .range(isFlipped ? baseRange.slice().reverse() : baseRange)
                         .clamp(true);
                     legendType = 'constraint_stacked';
+                } else if (isDbNSFPStacked) {
+                    // dbNSFP stacked: same pathogenicity gradient as constraint
+                    const baseRange = ['#488b49', '#dcdc04', '#e67e22', '#cc0000'];
+                    colorScale = d3.scaleLinear()
+                        .domain([0, 0.3, 0.7, 1.0])
+                        .range(isFlipped ? baseRange.slice().reverse() : baseRange)
+                        .clamp(true);
+                    legendType = 'dbnsfp_stacked';
                 } else if (isDomain) {
                     // Domain track: green for present, dark gray for absent
                     colorScale = (val) => val > 0 ? '#00b894' : '#555555';
@@ -2787,6 +2966,16 @@
                         colorScale,
                         barWidth * currentZoomTransform.k
                     );
+                } else if (isDbNSFPStacked) {
+                    // Score range depends on track type
+                    const scoreRange = trackId === 'AlphaMissense_stacked' ? [0, 1] : [-10, 5];
+                    trackCanvas.drawDbNSFPStacked(
+                        values,
+                        xScaleZoomed,
+                        colorScale,
+                        barWidth * currentZoomTransform.k,
+                        scoreRange
+                    );
                 } else if (isClinVarStacked) {
                     trackCanvas.drawClinVarStacked(
                         positionsData,
@@ -2828,6 +3017,7 @@
                     isDomain,
                     isClinVarStacked,
                     isConstraintStacked,
+                    isDbNSFPStacked,
                     usesHeightBars,
                     legendType,
                     legendBins,
@@ -2955,6 +3145,54 @@
                                 .attr('fill', '#888')
                                 .attr('font-size', '0.6rem');
                         });
+                } else if (legendType === 'dbnsfp_stacked') {
+                    // dbNSFP stacked: pathogenicity gradient (same as constraint)
+                    const gradientId = `dbnsfp-gradient-${i}-${Date.now()}`;
+                    const gradient = svg.append('defs')
+                        .append('linearGradient')
+                        .attr('id', gradientId)
+                        .attr('x1', '0%').attr('y1', '100%')
+                        .attr('x2', '0%').attr('y2', '0%');
+
+                    // Create gradient stops matching the color scale
+                    const stops = [
+                        { offset: 0, value: 0.0, color: '#488b49' },    // Green - benign
+                        { offset: 0.3, value: 0.3, color: '#dcdc04' },  // Yellow - uncertain
+                        { offset: 0.7, value: 0.7, color: '#e67e22' },  // Orange - moderate
+                        { offset: 1.0, value: 1.0, color: '#cc0000' }   // Red - pathogenic
+                    ];
+
+                    stops.forEach(stop => {
+                        gradient.append('stop')
+                            .attr('offset', `${stop.offset * 100}%`)
+                            .attr('stop-color', stop.color);
+                    });
+
+                    // Draw gradient bar
+                    colorbarG.append('rect')
+                        .attr('width', colorbarWidth)
+                        .attr('height', colorbarHeight)
+                        .attr('fill', `url(#${gradientId})`);
+
+                    // Add axis ticks
+                    const dbnsfpScale = d3.scaleLinear()
+                        .domain([0, 1.0])
+                        .range([colorbarHeight, 0]);
+
+                    const dbnsfpAxis = d3.axisRight(dbnsfpScale)
+                        .ticks(5)
+                        .tickFormat(d3.format('.1f'));
+
+                    colorbarG.append('g')
+                        .attr('transform', `translate(${colorbarWidth}, 0)`)
+                        .call(dbnsfpAxis)
+                        .call(g => {
+                            g.select('.domain').remove();
+                            g.selectAll('.tick line').attr('x2', 3).attr('stroke', '#777');
+                            g.selectAll('.tick text')
+                                .attr('fill', '#888')
+                                .attr('font-size', '0.6rem');
+                        });
                 } else if (legendType === 'discrete') {
                     // Discrete legend for counts/observed
                     const boxH = Math.max(12, colorbarHeight / (legendBins.length + 1));
@@ -3021,7 +3259,7 @@
                 }
 
                 // Add flip button next to colorbar (for continuous/gradient tracks only)
-                if (legendType === 'continuous' || legendType === 'constraint_stacked') {
+                if (legendType === 'continuous' || legendType === 'constraint_stacked' || legendType === 'dbnsfp_stacked') {
                     const isFlipped = flippedTracks.has(trackId);
                     const flipBtn = colorbarG.append('g')
                         .attr('class', 'flip-btn')
@@ -3243,10 +3481,13 @@
                         const newBarWidth = Math.max(1, (width / positionsData.length) * event.transform.k);
                         
                         // Redraw all track canvases
-                        trackCanvases.forEach(({ canvas, trackId, values, colorScale, isClinVarStacked, isDomain, isConstraintStacked, usesHeightBars, yMax, yMin }) => {
+                        trackCanvases.forEach(({ canvas, trackId, values, colorScale, isClinVarStacked, isDomain, isConstraintStacked, isDbNSFPStacked, usesHeightBars, yMax, yMin }) => {
                             // Use specialized drawing method based on track type
                             if (isConstraintStacked) {
                                 canvas.drawConstraintStacked(values, newXScale, colorScale, newBarWidth);
+                            } else if (isDbNSFPStacked) {
+                                const scoreRange = trackId === 'AlphaMissense_stacked' ? [0, 1] : [-10, 5];
+                                canvas.drawDbNSFPStacked(values, newXScale, colorScale, newBarWidth, scoreRange);
                             } else if (isClinVarStacked) {
                                 canvas.drawClinVarStacked(positionsData, newXScale, newBarWidth);
                             } else if (isDomain && trackId === 'domains') {
@@ -3409,6 +3650,7 @@
             const isClinVarStacked = isClinVarStackedTrack(trackId);
             const isClinVar = isClinVarTrack(trackId);
             const isConstraintStacked = isConstraintStackedTrack(trackId);
+            const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
 
             let tooltipContent = `
                 <div class="tooltip-title">${simplifyTrackName(trackId)}</div>
@@ -3445,15 +3687,61 @@
 
                     variants.forEach(variant => {
                         const color = getPathogenicityColor(variant.pred);
+                        // Get consequence info for display
+                        const csqInfo = variant.consequence ? CONSEQUENCE_CATEGORIES[variant.consequence] : null;
+                        const csqLabel = csqInfo ? csqInfo.abbrev : '';
+                        const csqColor = csqInfo ? csqInfo.color : '#888';
                         tooltipContent += `
                             <div class="tooltip-row" style="font-size: 11px; margin-left: 8px;">
                                 <span style="display: inline-block; width: 10px; height: 10px; background: ${color}; margin-right: 5px; vertical-align: middle; border: 1px solid #000;"></span>
                                 <span class="tooltip-value">${variant.allele}: ${variant.pred.toFixed(3)}</span>
+                                ${csqLabel ? `<span style="color: ${csqColor}; margin-left: 8px; font-size: 10px;">(${csqLabel})</span>` : ''}
                             </div>
                         `;
                     });
                 } else {
                     tooltipContent += `<div class="tooltip-row" style="color: #888;">No variant predictions</div>`;
+                }
+            } else if (isDbNSFPStacked) {
+                // Show dbNSFP variant scores
+                const variants = value && value.variants ? value.variants : [];
+                const scoreName = trackId === 'AlphaMissense_stacked' ? 'AlphaMissense' : 'ESM1b';
+                const scoreRange = trackId === 'AlphaMissense_stacked' ? [0, 1] : [-10, 5];
+
+                tooltipContent += `<div class="tooltip-row">Variants: <span class="tooltip-value">${variants.length}</span></div>`;
+
+                if (variants.length > 0) {
+                    tooltipContent += `<div class="tooltip-row" style="margin-top: 8px; border-top: 1px solid #555; padding-top: 8px;"><strong>${scoreName} Scores:</strong></div>`;
+
+                    // Define color function matching the color scale
+                    const getScoreColor = (score) => {
+                        // Normalize score to 0-1 range
+                        const [minS, maxS] = scoreRange;
+                        const normalized = Math.max(0, Math.min(1, (score - minS) / (maxS - minS)));
+                        if (normalized <= 0.3) {
+                            const t = normalized / 0.3;
+                            return `rgb(${Math.round(72 + (220-72)*t)}, ${Math.round(139 + (220-139)*t)}, ${Math.round(73 + (4-73)*t)})`;
+                        } else if (normalized <= 0.7) {
+                            const t = (normalized - 0.3) / 0.4;
+                            return `rgb(${Math.round(220 + (230-220)*t)}, ${Math.round(220 + (126-220)*t)}, ${Math.round(4 + (34-4)*t)})`;
+                        } else {
+                            const t = (normalized - 0.7) / 0.3;
+                            return `rgb(${Math.round(230 + (204-230)*t)}, ${Math.round(126 + (0-126)*t)}, ${Math.round(34 + (0-34)*t)})`;
+                        }
+                    };
+
+                    variants.forEach(variant => {
+                        const color = getScoreColor(variant.score);
+                        const percentileText = variant.percentile !== null ? ` (${variant.percentile.toFixed(1)}th %ile)` : '';
+                        tooltipContent += `
+                            <div class="tooltip-row" style="font-size: 11px; margin-left: 8px;">
+                                <span style="display: inline-block; width: 10px; height: 10px; background: ${color}; margin-right: 5px; vertical-align: middle; border: 1px solid #000;"></span>
+                                <span class="tooltip-value">${variant.allele}: ${variant.score.toFixed(3)}${percentileText}</span>
+                            </div>
+                        `;
+                    });
+                } else {
+                    tooltipContent += `<div class="tooltip-row" style="color: #888;">No variant scores</div>`;
                 }
             } else if (isClinVarStacked) {
                 // Show ClinVar labels
@@ -4888,11 +5176,12 @@
                 return;
             }
 
-            // Check if constraint stacked track
+            // Check if constraint or dbNSFP stacked track
             const isConstraintStacked = isConstraintStackedTrack(trackId);
+            const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
             const isFlipped = flippedTracks.has(trackId);
 
-            if (isConstraintStacked) {
+            if (isConstraintStacked || isDbNSFPStacked) {
                 // Use pathogenicity gradient for constraint stacked tracks
                 const pathogenicityColors = [
                     '#00b894',  // benign (green)
@@ -4946,9 +5235,10 @@
             const isOE = isOETrack(trackId);
             const isVIR = trackId.toLowerCase().includes('vir');
             const isConstraintStacked = isConstraintStackedTrack(trackId);
+            const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
             const useConstraintGradient = usesConstraintColors(trackId);
 
-            if (isConstraintStacked || useConstraintGradient) {
+            if (isConstraintStacked || isDbNSFPStacked || useConstraintGradient) {
                 // Constraint predictions, counts, RGC, comparators use same custom gradient
                 // High value = red (pathogenic/constrained), low value = green (benign/tolerant)
                 const baseRange = ['#488b49', '#dcdc04', '#e67e22', '#cc0000'];

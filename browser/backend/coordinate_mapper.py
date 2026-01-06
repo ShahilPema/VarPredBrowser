@@ -9,7 +9,7 @@ import json
 import math
 import polars as pl
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 
 class CoordinateMapper:
@@ -197,3 +197,55 @@ def extract_constraint_variants(variant_array: List) -> List[tuple]:
     variants.sort(key=lambda x: x[1])
 
     return variants
+
+
+def extract_dbnsfp_stacked_variants(variant_array: List) -> List[tuple]:
+    """
+    Extract variant score data from AlphaMissense_stacked/ESM1b_stacked columns.
+
+    Args:
+        variant_array: List of variant structs [{_0: allele, _1: score, _2: percentile}, ...]
+
+    Returns:
+        List of tuples: [(allele, score, percentile), ...] sorted by score value
+    """
+    if not variant_array or len(variant_array) == 0:
+        return []
+
+    variants = []
+    for v in variant_array:
+        if v and '_0' in v and '_1' in v:
+            allele = v['_0']
+            score = float(v['_1']) if v['_1'] is not None else None
+            percentile = float(v['_2']) if v.get('_2') is not None else None
+            if allele and score is not None:
+                variants.append((allele, score, percentile))
+
+    # Sort by score value (lowest to highest for bottom-to-top stacking)
+    variants.sort(key=lambda x: x[1])
+
+    return variants
+
+
+def extract_consequence_variants(csq_array: List) -> Dict[str, str]:
+    """
+    Extract variant consequence data from variant_consequences column.
+
+    Args:
+        csq_array: List of consequence tuples [{_0: allele, _1: csq_category}, ...]
+
+    Returns:
+        Dict mapping allele -> consequence category (plof, missense, synonymous, other)
+    """
+    if not csq_array or len(csq_array) == 0:
+        return {}
+
+    consequence_map = {}
+    for v in csq_array:
+        if v and '_0' in v and '_1' in v:
+            allele = v['_0']
+            csq = v['_1']
+            if allele and csq:
+                consequence_map[allele] = csq
+
+    return consequence_map

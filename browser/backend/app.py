@@ -23,10 +23,11 @@ from .models import (
     FilterInfo, Position, WindowResponse, GeneSearchResult, PositionSearchResult
 )
 from .coordinate_mapper import (
-    CoordinateMapper, sanitize_float, extract_constraint_variants
+    CoordinateMapper, sanitize_float, extract_constraint_variants,
+    extract_consequence_variants, extract_dbnsfp_stacked_variants
 )
 from .track_tree import (
-    TRACK_TREE, FILTERS, CONSTRAINT_STACKED_FIELDS,
+    TRACK_TREE, FILTERS, CONSTRAINT_STACKED_FIELDS, DBNSFP_STACKED_FIELDS,
     simplify_track_name, categorize_track
 )
 
@@ -268,6 +269,29 @@ async def get_track_data(
                         {"allele": allele, "pred": sanitize_float(pred)}
                         for allele, pred in variant_data
                     ]
+                })
+            return {"track_id": track_id, "values": values}
+        # For dbNSFP stacked columns, return full variant data with score and percentile
+        elif track_id in DBNSFP_STACKED_FIELDS:
+            values = []
+            for row in window_df.select(['filtered_idx', track_id]).to_dicts():
+                variant_data = extract_dbnsfp_stacked_variants(row[track_id])
+                values.append({
+                    "filtered_idx": row["filtered_idx"],
+                    "variants": [
+                        {"allele": allele, "score": sanitize_float(score), "percentile": sanitize_float(pct)}
+                        for allele, score, pct in variant_data
+                    ]
+                })
+            return {"track_id": track_id, "values": values}
+        # For variant_consequences column, return allele -> consequence map
+        elif track_id == 'variant_consequences':
+            values = []
+            for row in window_df.select(['filtered_idx', track_id]).to_dicts():
+                consequence_map = extract_consequence_variants(row[track_id])
+                values.append({
+                    "filtered_idx": row["filtered_idx"],
+                    "consequences": consequence_map  # Dict: allele -> category
                 })
             return {"track_id": track_id, "values": values}
         else:
@@ -683,6 +707,7 @@ async def get_residue_scores(
         pos_to_data[(row['chrom'], row['pos'])] = row
 
     is_constraint_stacked = field in CONSTRAINT_STACKED_FIELDS
+    is_dbnsfp_stacked = field in DBNSFP_STACKED_FIELDS
     residue_values = {}
 
     for pos_info in positions:
@@ -696,15 +721,16 @@ async def get_residue_scores(
             if value is None:
                 continue
 
-            if is_constraint_stacked:
+            if is_constraint_stacked or is_dbnsfp_stacked:
+                # Both constraint and dbNSFP stacked fields store score in _1
                 if isinstance(value, list):
                     for variant in value:
                         if isinstance(variant, dict):
-                            pred = variant.get('_1')
-                            if pred is not None and not (isinstance(pred, float) and (pred != pred)):
+                            score = variant.get('_1')
+                            if score is not None and not (isinstance(score, float) and (score != score)):
                                 if residue_num not in residue_values:
                                     residue_values[residue_num] = []
-                                residue_values[residue_num].append(float(pred))
+                                residue_values[residue_num].append(float(score))
             else:
                 if not (isinstance(value, float) and (value != value)):
                     if residue_num not in residue_values:
@@ -727,6 +753,12 @@ async def get_residue_scores(
 
     if is_constraint_stacked:
         value_range = [0.0, 1.0]
+    elif is_dbnsfp_stacked:
+        # AlphaMissense is 0-1, ESM1b has different range (typically -10 to 5)
+        if field == 'AlphaMissense_stacked':
+            value_range = [0.0, 1.0]
+        else:
+            value_range = [min(all_values), max(all_values)] if all_values else [-10.0, 5.0]
     else:
         value_range = [min(all_values), max(all_values)] if all_values else [None, None]
 
@@ -737,7 +769,8 @@ async def get_residue_scores(
         "residue_count": len(scores),
         "range": value_range,
         "scores": scores,
-        "is_constraint_stacked": is_constraint_stacked
+        "is_constraint_stacked": is_constraint_stacked,
+        "is_dbnsfp_stacked": is_dbnsfp_stacked
     }
 
 

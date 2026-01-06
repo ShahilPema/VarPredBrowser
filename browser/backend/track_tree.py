@@ -249,8 +249,10 @@ def build_track_tree() -> Dict[str, Any]:
                     {
                         "label": "Pathogenicity / Model Scores",
                         "children": [
-                            {"label": "AlphaMissense", "fieldId": "dbnsfp.max_AlphaMissense_am_pathogenicity"},
-                            {"label": "ESM1b", "fieldId": "dbnsfp.max_ESM1b_score"},
+                            {"label": "AlphaMissense (max)", "fieldId": "dbnsfp.max_AlphaMissense_am_pathogenicity"},
+                            {"label": "AlphaMissense (stacked)", "fieldId": "AlphaMissense_stacked", "type": "dbnsfp_stacked"},
+                            {"label": "ESM1b (max)", "fieldId": "dbnsfp.max_ESM1b_score"},
+                            {"label": "ESM1b (stacked)", "fieldId": "ESM1b_stacked", "type": "dbnsfp_stacked"},
                         ],
                     },
                     {
@@ -313,6 +315,9 @@ def simplify_track_name(track_name: str) -> str:
         'dbnsfp.max_AlphaSync_plddt10': 'pLDDT (10)',
         'dbnsfp.max_AlphaSync_relasa': 'RelASA',
         'dbnsfp.max_AlphaSync_relasa10': 'RelASA (10)',
+        # Stacked tracks
+        'AlphaMissense_stacked': 'AlphaMissense (stacked)',
+        'ESM1b_stacked': 'ESM1b (stacked)',
     }
     if track_name in name_mappings:
         return name_mappings[track_name]
@@ -376,6 +381,10 @@ def categorize_track(track_name: str) -> str:
     # Conservation scores (PhyloP)
     elif 'phylop' in name_lower:
         return 'Conservation'
+
+    # dbNSFP stacked tracks
+    elif track_name.endswith('_stacked'):
+        return 'Pathogenicity (Stacked)'
 
     # Pathogenicity scores (AlphaMissense, ESM1b)
     elif 'alphamissense' in name_lower or 'esm1b' in name_lower:
@@ -446,3 +455,6 @@ FILTERS = {
 
 # Set of constraint stacked track fields that store variant arrays
 CONSTRAINT_STACKED_FIELDS = {'Constraint', 'Core', 'Complete'}
+
+# Set of dbNSFP stacked track fields that store variant arrays (allele, score, percentile)
+DBNSFP_STACKED_FIELDS = {'AlphaMissense_stacked', 'ESM1b_stacked'}
