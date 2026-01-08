@@ -363,6 +363,77 @@ merged = merged.annotate(
 
 ---
 
+## 4. Add phyloP Conservation Scores
+
+**Status:** Pending
+**Priority:** High
+**Rationale:** phyloP tracks are defined in track_tree.py but no data is currently being loaded. Conservation scores are essential for variant interpretation.
+
+### Data Source
+
+Located at `/storage/zoghbi/data/sharing/hail_tables/phyloPscores_hg38_final.ht`
+
+### Current Issue
+
+The browser defines three phyloP tracks in `track_tree.py` (lines 234-239):
+- `phylop_scores_447way`
+- `phylop_scores_100way`
+- `phylop17way`
+
+However, these columns are not present in the browser data parquet files, causing empty tracks.
+
+### Implementation
+
+Add phyloP annotation to base table:
+
+```python
+# Load phyloP scores
+phylop_ht = hl.read_table('/storage/zoghbi/data/sharing/hail_tables/phyloPscores_hg38_final.ht')
+
+# Annotate base table with phyloP scores
+# (Field names TBD - need to inspect table schema)
+base_ht = base_ht.annotate(
+    phylop_scores_447way = phylop_ht[base_ht.locus].phylop_447way,
+    phylop_scores_100way = phylop_ht[base_ht.locus].phylop_100way,
+    phylop17way = phylop_ht[base_ht.locus].phylop_17way
+)
+```
+
+### Pre-Implementation Steps
+
+1. **Inspect table schema** to get exact field names:
+   ```python
+   phylop_ht = hl.read_table('/storage/zoghbi/data/sharing/hail_tables/phyloPscores_hg38_final.ht')
+   phylop_ht.describe()
+   ```
+
+2. **Verify key compatibility** - confirm table is keyed by locus (GRCh38)
+
+3. **Check data types** - phyloP scores are typically Float32/Float64
+
+### Expected Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `phylop_scores_447way` | Float64 | 447-way vertebrate conservation |
+| `phylop_scores_100way` | Float64 | 100-way vertebrate conservation |
+| `phylop17way` | Float64 | 17-way primate conservation |
+
+### Downstream Impact
+
+1. **preprocess_browser_data.py** - Columns will automatically be included if present in source parquet
+2. **Backend** - No changes needed (track definitions already exist)
+3. **Frontend** - No changes needed (tracks already configured)
+
+### Validation
+
+- [ ] Inspect phyloP hail table schema
+- [ ] Add annotation to browser_data.ipynb
+- [ ] Verify columns present in exported parquet
+- [ ] Confirm tracks display in browser
+
+---
+
 ## Future Additions
 
 _Add additional refactoring tasks below as needed._
@@ -376,3 +447,4 @@ _Add additional refactoring tasks below as needed._
 | 2026-01-07 | Initial plan: tuple → struct refactoring | Pending |
 | 2026-01-07 | Add gnomAD coverage expansion | Pending |
 | 2026-01-08 | Add allele frequency collection | Pending |
+| 2026-01-08 | Add phyloP conservation scores | Pending |
