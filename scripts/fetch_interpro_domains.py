@@ -138,12 +138,5 @@ def main():
     if failed:
         print(f"Failed to fetch {len(failed)} proteins")
 
-    # Show Q99250 (SCN2A) as example
-    if 'Q99250' in new_cache:
-        print(f"\nQ99250 (SCN2A) has {len(new_cache['Q99250'])} representative domains:")
-        for d in sorted(new_cache['Q99250'], key=lambda x: x['start_aa']):
-            print(f"  {d['start_aa']:4d}-{d['end_aa']:4d}: {d['source_db']:12s} {d['member_db_id']}")
-
-
 if __name__ == '__main__':
     main()
