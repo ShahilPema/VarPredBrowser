@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 # Download URLs
 INTERPRO_XML_URL = "https://ftp.ebi.ac.uk/pub/databases/interpro/releases/103.0/match_complete.xml.gz"
-MANE_SUMMARY_URL = "https://ftp.ncbi.nlm.nih.gov/refseq/MANE/MANE_human/current/MANE.GRCh38.v1.4.summary.txt.gz"
+MANE_SUMMARY_URL = "https://ftp.ncbi.nlm.nih.gov/refseq/MANE/MANE_human/current/MANE.GRCh38.v1.5.summary.txt.gz"
 UNIPROT_MAPPING_URL = "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping.dat.gz"
 
 # InterPro types that use the representative field for de-duplication
