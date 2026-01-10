@@ -143,6 +143,83 @@ def build_vir_tree() -> Dict[str, Any]:
     }
 
 
+def build_gnomad_oe_tree() -> Dict[str, Any]:
+    """Build the gnomAD O/E Ratios tree section (Section 6 of browser-data-refactor.md)."""
+
+    def window_node(consequence: str, window: str) -> Dict[str, Any]:
+        return {
+            "label": window,
+            "children": [
+                {
+                    "label": "O/E",
+                    "fieldId": f"gnomad_{consequence}_{window}_oe",
+                },
+                {
+                    "label": "Expected",
+                    "fieldId": f"gnomad_{consequence}_{window}_e",
+                },
+            ],
+        }
+
+    windows = ["21bp", "45bp", "93bp", "9bp", "3bp"]  # Most used first
+    consequences = [("mis", "Missense"), ("syn", "Synonymous"), ("any", "Any")]
+
+    return {
+        "label": "O/E Ratios",
+        "children": [
+            {
+                "label": cons_label,
+                "children": [window_node(cons, w) for w in windows],
+            }
+            for cons, cons_label in consequences
+        ],
+    }
+
+
+def build_coverage_tree() -> Dict[str, Any]:
+    """Build the Coverage track tree section (browser-data-refactor.md Task 2)."""
+    # 12 total coverage columns: 6 thresholds x 2 cohorts
+    thresholds = [10, 15, 20, 25, 30, 50]
+    return {
+        "label": "Coverage",
+        "children": [
+            {
+                "label": "Exomes",
+                "children": [
+                    {"label": f">{t}x", "fieldId": f"gnomad_exomes_over_{t}"}
+                    for t in thresholds
+                ],
+            },
+            {
+                "label": "Genomes",
+                "children": [
+                    {"label": f">{t}x", "fieldId": f"gnomad_genomes_over_{t}"}
+                    for t in thresholds
+                ],
+            },
+        ],
+    }
+
+
+def build_comparable_percentiles_tree() -> Dict[str, Any]:
+    """Build the Comparable Percentiles track section (browser-data-refactor.md Task 10).
+
+    These percentiles are calculated across positions where ALL 6 scores are defined,
+    enabling direct cross-track comparison.
+    """
+    return {
+        "label": "Comparable %iles",
+        "children": [
+            {"label": "AlphaMissense", "fieldId": "AlphaMissense_am_pathogenicity_cross_norm_perc"},
+            {"label": "ESM1b", "fieldId": "ESM1b_score_cross_norm_perc"},
+            {"label": "MTR", "fieldId": "RGC_MTR_MTR_cross_norm_perc"},
+            {"label": "Constraint", "fieldId": "Constraint_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc"},
+            {"label": "Core", "fieldId": "Core_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc"},
+            {"label": "Complete", "fieldId": "Complete_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc"},
+        ]
+    }
+
+
 def build_track_tree() -> Dict[str, Any]:
     """Build the complete track tree structure."""
     track_tree = {
@@ -169,7 +246,6 @@ def build_track_tree() -> Dict[str, Any]:
                                 "children": [
                                     {"label": "Observed", "fieldId": "rgc_any_obs_exomes_XX_XY"},
                                     {"label": "Expected μ", "fieldId": "rgc_any_prob_mu_exomes_XX_XY"},
-                                    {"label": "Max AF", "fieldId": "rgc_any_max_af"},
                                 ],
                             },
                             {
@@ -177,7 +253,6 @@ def build_track_tree() -> Dict[str, Any]:
                                 "children": [
                                     {"label": "Observed", "fieldId": "rgc_syn_obs_exomes_XX_XY"},
                                     {"label": "Expected μ", "fieldId": "rgc_syn_prob_mu_exomes_XX_XY"},
-                                    {"label": "Max AF", "fieldId": "rgc_syn_max_af"},
                                 ],
                             },
                             {
@@ -185,7 +260,6 @@ def build_track_tree() -> Dict[str, Any]:
                                 "children": [
                                     {"label": "Observed", "fieldId": "rgc_mis_obs_exomes_XX_XY"},
                                     {"label": "Expected μ", "fieldId": "rgc_mis_prob_mu_exomes_XX_XY"},
-                                    {"label": "Max AF", "fieldId": "rgc_mis_max_af"},
                                 ],
                             },
                         ],
@@ -276,6 +350,27 @@ def build_track_tree() -> Dict[str, Any]:
             child["children"].append(build_vir_tree())
             break
 
+    # Add gnomAD section (Section 6 of browser-data-refactor.md)
+    gnomad_section = {
+        "label": "gnomAD",
+        "children": [
+            build_gnomad_oe_tree(),
+            build_coverage_tree(),
+        ],
+    }
+    # Insert gnomAD after RGC
+    for i, child in enumerate(track_tree["children"]):
+        if child["label"] == "RGC":
+            track_tree["children"].insert(i + 1, gnomad_section)
+            break
+
+    # Add Comparable Percentiles section (Task 10 of browser-data-refactor.md)
+    # Insert after Comparators section
+    for i, child in enumerate(track_tree["children"]):
+        if child["label"] == "Comparators":
+            track_tree["children"].insert(i + 1, build_comparable_percentiles_tree())
+            break
+
     return track_tree
 
 
@@ -318,9 +413,45 @@ def simplify_track_name(track_name: str) -> str:
         # Stacked tracks
         'AlphaMissense_stacked': 'AlphaMissense (stacked)',
         'ESM1b_stacked': 'ESM1b (stacked)',
+        # gnomAD coverage (all 12 thresholds)
+        'gnomad_exomes_over_10': 'Exome >10x',
+        'gnomad_exomes_over_15': 'Exome >15x',
+        'gnomad_exomes_over_20': 'Exome >20x',
+        'gnomad_exomes_over_25': 'Exome >25x',
+        'gnomad_exomes_over_30': 'Exome >30x',
+        'gnomad_exomes_over_50': 'Exome >50x',
+        'gnomad_genomes_over_10': 'Genome >10x',
+        'gnomad_genomes_over_15': 'Genome >15x',
+        'gnomad_genomes_over_20': 'Genome >20x',
+        'gnomad_genomes_over_25': 'Genome >25x',
+        'gnomad_genomes_over_30': 'Genome >30x',
+        'gnomad_genomes_over_50': 'Genome >50x',
+        # Cross-normalized percentiles
+        'AlphaMissense_am_pathogenicity_cross_norm_perc': 'AlphaMissense (comp %ile)',
+        'ESM1b_score_cross_norm_perc': 'ESM1b (comp %ile)',
+        'RGC_MTR_MTR_cross_norm_perc': 'MTR (comp %ile)',
+        'Constraint_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc': 'Constraint (comp %ile)',
+        'Core_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc': 'Core (comp %ile)',
+        'Complete_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc': 'Complete (comp %ile)',
+        # ClinVar variants (new format)
+        'clinvar_variants': 'ClinVar Variants',
+        # Variant frequencies
+        'rgc_variants': 'RGC Frequencies',
+        'gnomad_exomes_variants': 'gnomAD Exome Frequencies',
+        'gnomad_genomes_variants': 'gnomAD Genome Frequencies',
     }
     if track_name in name_mappings:
         return name_mappings[track_name]
+
+    # Handle gnomAD constraint O/E columns
+    if track_name.startswith('gnomad_') and ('_oe' in track_name or track_name.endswith('_e')):
+        parts = track_name.replace('gnomad_', '').split('_')
+        return f"gnomAD {' '.join(parts).upper()}"
+
+    # Handle cross-norm percentile columns
+    if '_cross_norm_perc' in track_name:
+        base = track_name.replace('_cross_norm_perc', '')
+        return f"{base.replace('_', ' ').title()} (cross-norm %)"
 
     simplified = track_name
 
@@ -381,6 +512,18 @@ def categorize_track(track_name: str) -> str:
     # Conservation scores (PhyloP)
     elif 'phylop' in name_lower:
         return 'Conservation'
+
+    # gnomAD constraint O/E metrics
+    elif track_name.startswith('gnomad_') and ('_oe' in name_lower or name_lower.endswith('_e')):
+        return 'gnomAD Constraint'
+
+    # gnomAD coverage
+    elif track_name.startswith('gnomad_') and ('mean' in name_lower or 'median' in name_lower or 'over_' in name_lower):
+        return 'gnomAD Coverage'
+
+    # Cross-normalized percentiles
+    elif '_cross_norm_perc' in name_lower:
+        return 'Cross-Norm Percentiles'
 
     # dbNSFP stacked tracks
     elif track_name.endswith('_stacked'):
@@ -443,12 +586,16 @@ TRACK_TREE = build_track_tree()
 
 # Available filters
 FILTERS = {
-    'mis_count_gt0': {
-        'name': 'Missense Possible',
+    'missense_only': {
+        'name': 'Missense Only',
         'description': 'Positions where missense variants are possible (mis_count > 0)',
     },
-    'any_count_gt0': {
-        'name': 'Any Variant Possible',
+    'synonymous_only': {
+        'name': 'Synonymous Only',
+        'description': 'Positions where synonymous variants are possible (syn_count > 0)',
+    },
+    'all_sites': {
+        'name': 'All Sites',
         'description': 'All coding positions where any variant is possible (any_count > 0)',
     }
 }

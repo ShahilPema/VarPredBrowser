@@ -37,57 +37,95 @@ except ImportError:
 
 # Filter definitions
 FILTERS = {
-    'any_count_gt0': {
+    'all_sites': {
         'description': 'All positions where any variant is possible',
         'condition': pl.col('rgc_any_count') > 0
     },
-    'mis_count_gt0': {
+    'missense_only': {
         'description': 'Positions where missense variants are possible',
         'condition': pl.col('rgc_mis_count') > 0
+    },
+    'synonymous_only': {
+        'description': 'Positions where synonymous variants are possible',
+        'condition': pl.col('rgc_syn_count') > 0
     }
 }
 
-# ClinVar columns
-CLINVAR_COLUMNS = [
+# ClinVar columns (new format: array of structs)
+CLINVAR_VARIANTS_COLUMN = 'clinvar_variants'  # array<struct{alt, significance, status, mol_csq, variation_id}>
+
+# Legacy ClinVar columns (for backwards compatibility)
+CLINVAR_LEGACY_COLUMNS = [
     'clinvar.clinvar_count',
     'clinvar.clinvar_label_list',
     'clinvar.clinvar_status_list',
     'clinvar.clinvar_var_type_list',
 ]
 
-# Training label columns
+# Training label columns (flattened from training.train_counts.*)
 TRAINING_COLUMNS = [
-    'training.train_counts.unlabelled',
-    'training.train_counts.labelled',
-    'training.train_counts.unlabelled_high_qual',
-    'training.train_counts.labelled_high_qual',
+    'train_unlabelled',
+    'train_labelled',
+    'train_unlabelled_high_qual',
+    'train_labelled_high_qual',
 ]
 
-# dbNSFP score columns (non-RGC)
+# dbNSFP score columns (flattened from dbnsfp.max_*)
+# Percentiles are calculated in Polars, not stored here
 DBNSFP_SCORE_COLUMNS = [
-    'dbnsfp.max_AlphaMissense_am_pathogenicity',
-    'dbnsfp.max_RGC_MTR_MTR',
-    'dbnsfp.max_RGC_MTR_MTRpercentile_exome',
-    'dbnsfp.max_Non_Neuro_CCR_resid_pctile',
-    'dbnsfp.max_ESM1b_score',
-    'dbnsfp.max_AlphaSync_plddt',
-    'dbnsfp.max_AlphaSync_plddt10',
-    'dbnsfp.max_AlphaSync_relasa',
-    'dbnsfp.max_AlphaSync_relasa10',
+    'max_AlphaMissense_am_pathogenicity',
+    'max_ESM1b_score',
+    'max_RGC_MTR_MTR',
+    'max_Non_Neuro_CCR_resid_pctile',
+    'max_AlphaSync_plddt',
+    'max_AlphaSync_plddt10',
+    'max_AlphaSync_relasa',
+    'max_AlphaSync_relasa10',
 ]
 
-# gnomAD columns
-GNOMAD_COLUMNS = [
+# gnomAD coverage columns (expanded per browser-data-refactor.md Task 2)
+# 12 total: 6 thresholds x 2 cohorts
+GNOMAD_COVERAGE_COLUMNS = [
+    'gnomad_exomes_over_10',
+    'gnomad_exomes_over_15',
     'gnomad_exomes_over_20',
+    'gnomad_exomes_over_25',
+    'gnomad_exomes_over_30',
+    'gnomad_exomes_over_50',
+    'gnomad_genomes_over_10',
+    'gnomad_genomes_over_15',
     'gnomad_genomes_over_20',
+    'gnomad_genomes_over_25',
+    'gnomad_genomes_over_30',
+    'gnomad_genomes_over_50',
+]
+
+# Variant frequency array columns (browser-data-refactor.md Task 4)
+VARIANT_FREQUENCY_COLUMNS = [
+    'rgc_variants',           # array<struct{alt, af, ac, an, filters}>
+    'gnomad_exomes_variants', # array<struct{alt, af, ac, an, filters}>
+    'gnomad_genomes_variants', # array<struct{alt, af, ac, an, filters}>
+]
+
+# phyloP conservation scores (browser-data-refactor.md Section 4)
+PHYLOP_COLUMNS = [
+    'phylop_scores_447way',
+    'phylop_scores_100way',
 ]
 
 # Constraint prediction column (from AOU_RGC_All_preds.ht)
-# Format: Array of tuples, one per variant at locus
-# Each tuple: ((Constraint_1000_pred, Constraint_1000_n_pred),
-#              (Core_1000_pred, Core_1000_n_pred),
-#              (Complete_1000_pred, Complete_1000_n_pred))
+# Format: Array of structs, one per variant at locus (REFACTORED from tuples)
+# Each struct: {alt: str, pred: float32, n_pred: int32}
 CONSTRAINT_PREDS_COLUMN = ['Constraint', 'Core', 'Complete']
+
+# Stacked scores columns (variant-level data with struct format)
+STACKED_SCORE_COLUMNS = [
+    'AlphaMissense_stacked',  # array<struct{alt: str, score: float64, percentile: float64}>
+    'ESM1b_stacked',          # array<struct{alt: str, score: float64, percentile: float64}>
+]
+
+# Variant consequences column
+VARIANT_CONSEQUENCES_COLUMN = 'variant_consequences'  # array<struct{alt: str, csq: str}>
 
 # Domains column (now array format)
 DOMAIN_COLUMN = 'domains'
@@ -130,9 +168,15 @@ def get_columns_to_keep(df, chrom_col, pos_col, gene_col):
     rgc_columns = [col for col in df.columns if col.startswith('rgc_')]
     columns_to_keep.extend(rgc_columns)
     
-    # Add ClinVar columns
-    clinvar_cols = [col for col in CLINVAR_COLUMNS if col in df.columns]
-    columns_to_keep.extend(clinvar_cols)
+    # Add ClinVar variants column (new format)
+    if CLINVAR_VARIANTS_COLUMN in df.columns:
+        columns_to_keep.append(CLINVAR_VARIANTS_COLUMN)
+        clinvar_count = 1
+    else:
+        # Fall back to legacy format
+        clinvar_cols = [col for col in CLINVAR_LEGACY_COLUMNS if col in df.columns]
+        columns_to_keep.extend(clinvar_cols)
+        clinvar_count = len(clinvar_cols)
     
     # Add Training columns
     training_cols = [col for col in TRAINING_COLUMNS if col in df.columns]
@@ -142,34 +186,61 @@ def get_columns_to_keep(df, chrom_col, pos_col, gene_col):
     dbnsfp_score_cols = [col for col in DBNSFP_SCORE_COLUMNS if col in df.columns]
     columns_to_keep.extend(dbnsfp_score_cols)
     
-    # Add gnomAD columns
-    gnomad_cols = [col for col in GNOMAD_COLUMNS if col in df.columns]
-    columns_to_keep.extend(gnomad_cols)
-    
-    # Add constraint predictions column (array of tuples)
+    # Add gnomAD coverage columns (12 total)
+    gnomad_cov_cols = [col for col in GNOMAD_COVERAGE_COLUMNS if col in df.columns]
+    columns_to_keep.extend(gnomad_cov_cols)
+
+    # Add variant frequency array columns (3 total)
+    variant_freq_cols = [col for col in VARIANT_FREQUENCY_COLUMNS if col in df.columns]
+    columns_to_keep.extend(variant_freq_cols)
+
+    # Add phyloP conservation scores (Section 4)
+    phylop_cols = [col for col in PHYLOP_COLUMNS if col in df.columns]
+    columns_to_keep.extend(phylop_cols)
+
+    # Auto-detect gnomAD constraint columns (Task 5) - pattern: gnomad_*_oe, gnomad_*vir*
+    # These columns have gnomad_ prefix and contain oe or vir metrics
+    gnomad_constraint_cols = [col for col in df.columns
+                              if col.startswith('gnomad_') and ('_oe' in col or 'vir' in col)]
+    columns_to_keep.extend(gnomad_constraint_cols)
+
+    # Add constraint predictions column (array of structs, REFACTORED from tuples)
     prediction_cols = [col for col in CONSTRAINT_PREDS_COLUMN if col in df.columns]
     columns_to_keep.extend(prediction_cols)
-    
-    # Auto-detect and add percentile columns
-    perc_columns = [c for c in df.columns if c.endswith('_exome_perc')]
+
+    # Add stacked score columns (variant-level with struct format)
+    stacked_cols = [col for col in STACKED_SCORE_COLUMNS if col in df.columns]
+    columns_to_keep.extend(stacked_cols)
+
+    # Add variant consequences column
+    if VARIANT_CONSEQUENCES_COLUMN in df.columns:
+        columns_to_keep.append(VARIANT_CONSEQUENCES_COLUMN)
+
+    # Auto-detect and add percentile columns (exome and cross-norm)
+    perc_columns = [c for c in df.columns if c.endswith('_exome_perc') or c.endswith('_cross_norm_perc')]
     columns_to_keep.extend(perc_columns)
-    
+
     # Add domains column
     if DOMAIN_COLUMN in df.columns:
         columns_to_keep.append(DOMAIN_COLUMN)
-    
+
     # Filter to columns that exist and remove duplicates
     columns_to_keep = list(dict.fromkeys([
         col for col in columns_to_keep if col in df.columns
     ]))
-    
+
     return columns_to_keep, {
         'rgc': len(rgc_columns),
-        'clinvar': len(clinvar_cols),
+        'clinvar': clinvar_count,
         'training': len(training_cols),
         'dbnsfp': len(dbnsfp_score_cols),
-        'gnomad': len(gnomad_cols),
+        'gnomad_coverage': len(gnomad_cov_cols),
+        'variant_freq': len(variant_freq_cols),
+        'phylop': len(phylop_cols),
+        'gnomad_constraint': len(gnomad_constraint_cols),
         'constraint_preds': len(prediction_cols),
+        'stacked_scores': len(stacked_cols),
+        'variant_consequences': 1 if VARIANT_CONSEQUENCES_COLUMN in df.columns else 0,
         'percentiles': len(perc_columns),
         'domains': 1 if DOMAIN_COLUMN in df.columns else 0
     }
@@ -208,8 +279,13 @@ def process_filter(df, filter_id, filter_config, chrom_col, pos_col, gene_col, c
     print(f"  - ClinVar: {col_counts['clinvar']}")
     print(f"  - Training labels: {col_counts['training']}")
     print(f"  - dbNSFP scores: {col_counts['dbnsfp']}")
-    print(f"  - gnomAD: {col_counts['gnomad']}")
+    print(f"  - gnomAD coverage: {col_counts['gnomad_coverage']}")
+    print(f"  - Variant frequencies: {col_counts['variant_freq']}")
+    print(f"  - phyloP: {col_counts['phylop']}")
+    print(f"  - gnomAD constraint: {col_counts['gnomad_constraint']}")
     print(f"  - Constraint predictions: {col_counts['constraint_preds']}")
+    print(f"  - Stacked scores: {col_counts['stacked_scores']}")
+    print(f"  - Variant consequences: {col_counts['variant_consequences']}")
     print(f"  - Percentiles: {col_counts['percentiles']}")
     print(f"  - Domains: {col_counts['domains']}")
     print(f"  Total columns: {len(columns_to_keep)}")

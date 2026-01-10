@@ -249,3 +249,73 @@ def extract_consequence_variants(csq_array: List) -> Dict[str, str]:
                 consequence_map[allele] = csq
 
     return consequence_map
+
+
+def extract_clinvar_variants(variant_array: List) -> List[Dict]:
+    """
+    Extract ClinVar variant data from clinvar_variants column.
+
+    Args:
+        variant_array: List of ClinVar variant structs
+            [{_0: alt, _1: significance, _2: status, _3: mol_csq, _4: variation_id}, ...]
+
+    Returns:
+        List of dicts: [{alt, significance, status, mol_csq, variation_id}, ...]
+    """
+    if not variant_array or len(variant_array) == 0:
+        return []
+
+    variants = []
+    for v in variant_array:
+        if v and '_0' in v:
+            variants.append({
+                'alt': v.get('_0'),
+                'significance': v.get('_1'),
+                'status': v.get('_2'),
+                'mol_csq': v.get('_3'),
+                'variation_id': v.get('_4')
+            })
+
+    return variants
+
+
+def extract_frequency_variants(variant_array: List) -> List[Dict]:
+    """
+    Extract allele frequency data from rgc_variants/gnomad_*_variants columns.
+
+    Args:
+        variant_array: List of frequency variant structs
+            [{_0: alt, _1: af, _2: ac, _3: an, _4: filters}, ...]
+
+    Returns:
+        List of dicts: [{alt, af, ac, an, filters}, ...] sorted by AF descending
+    """
+    if not variant_array or len(variant_array) == 0:
+        return []
+
+    variants = []
+    for v in variant_array:
+        if v and '_0' in v:
+            af = sanitize_float(v.get('_1'))
+            ac = v.get('_2')
+            an = v.get('_3')
+            filters = v.get('_4')
+
+            # Convert set to list if needed
+            if isinstance(filters, set):
+                filters = list(filters)
+            elif filters is None:
+                filters = []
+
+            variants.append({
+                'alt': v.get('_0'),
+                'af': af,
+                'ac': ac,
+                'an': an,
+                'filters': filters
+            })
+
+    # Sort by AF descending (most common first)
+    variants.sort(key=lambda x: x['af'] if x['af'] is not None else 0, reverse=True)
+
+    return variants
