@@ -23,8 +23,6 @@ SCORE_COLUMNS = {
     'max_AlphaMissense_am_pathogenicity': 'AlphaMissense_am_pathogenicity',
     'max_ESM1b_score': 'ESM1b_score',
     'max_RGC_MTR_MTR': 'RGC_MTR_MTR',
-    # Constraint predictions (need to extract from stacked arrays - use max per locus)
-    # These are handled separately since they're arrays
 }
 
 # Stacked array columns - we'll extract max prediction per locus
@@ -67,40 +65,39 @@ def get_vir_columns() -> dict:
     return columns
 
 
-def calculate_exome_percentile(df: pl.DataFrame, col: str, output_name: str) -> pl.DataFrame:
+def build_percentile_exprs(df: pl.DataFrame, columns: dict[str, str]) -> list[pl.Expr]:
     """
-    Calculate exome-wide percentile for a column using average rank method.
+    Build percentile expressions for all columns at once.
 
-    Percentile = (rank / count_non_null) * 100
+    Returns list of expressions that can be passed to with_columns().
     """
-    non_null_count = df.filter(pl.col(col).is_not_null()).height
+    exprs = []
+    for col, name in columns.items():
+        if col in df.columns:
+            # Count non-null values for this column
+            non_null_count = df.select(pl.col(col).is_not_null().sum()).item()
+            if non_null_count > 0:
+                exprs.append(
+                    (pl.col(col).rank(method='average') / non_null_count * 100)
+                    .alias(f'{name}_exome_perc')
+                )
+    return exprs
 
-    if non_null_count == 0:
-        return df.with_columns(pl.lit(None).alias(f'{output_name}_exome_perc'))
 
-    # Use rank with average method for ties
-    return df.with_columns(
-        (pl.col(col).rank(method='average') / non_null_count * 100)
-        .alias(f'{output_name}_exome_perc')
-    )
-
-
-def extract_max_pred(df: pl.DataFrame, col: str) -> pl.DataFrame:
+def build_max_pred_exprs(df: pl.DataFrame, columns: list[str]) -> list[pl.Expr]:
     """
-    Extract max prediction value from stacked array column.
+    Build expressions to extract max prediction from stacked array columns.
 
     Array format: [{alt: str, pred: float, n_pred: int}, ...]
     """
-    # Check if column exists and has data
-    if col not in df.columns:
-        return df.with_columns(pl.lit(None).cast(pl.Float64).alias(f'{col}_max_pred'))
-
-    # Extract max pred value from array of structs
-    # Struct fields are named: alt, pred, n_pred (from hl.struct() in Hail)
-    return df.with_columns(
-        pl.col(col).list.eval(pl.element().struct.field('pred')).list.max()
-        .alias(f'{col}_max_pred')
-    )
+    exprs = []
+    for col in columns:
+        if col in df.columns:
+            exprs.append(
+                pl.col(col).list.eval(pl.element().struct.field('pred')).list.max()
+                .alias(f'{col}_max_pred')
+            )
+    return exprs
 
 
 def main(input_path: str, output_path: str):
@@ -108,52 +105,44 @@ def main(input_path: str, output_path: str):
     df = pl.read_parquet(input_path)
     print(f"Loaded {len(df):,} rows, {len(df.columns)} columns")
 
-    # --- EXOME-WIDE PERCENTILES ---
-    print("\n=== Calculating Exome-Wide Percentiles ===")
+    # Collect all column mappings
+    all_columns = {}
+    all_columns.update(SCORE_COLUMNS)
+    all_columns.update(get_oe_columns())
+    all_columns.update(get_vir_columns())
 
-    print("\n--- dbNSFP Scores ---")
-    for col, name in SCORE_COLUMNS.items():
-        if col in df.columns:
-            print(f"  {col} -> {name}_exome_perc")
-            df = calculate_exome_percentile(df, col, name)
-        else:
-            print(f"  {col} - NOT FOUND, skipping")
+    # Report which columns are available
+    available = [col for col in all_columns if col in df.columns]
+    missing = [col for col in all_columns if col not in df.columns]
+    print(f"\n=== Column Availability ===")
+    print(f"  Available: {len(available)}/{len(all_columns)}")
+    if missing:
+        print(f"  Missing: {missing[:5]}{'...' if len(missing) > 5 else ''}")
 
-    # --- O/E PERCENTILES ---
-    print("\n--- O/E Ratios ---")
-    oe_columns = get_oe_columns()
-    for col, name in oe_columns.items():
-        if col in df.columns:
-            print(f"  {col} -> {name}_exome_perc")
-            df = calculate_exome_percentile(df, col, name)
-        else:
-            print(f"  {col} - NOT FOUND, skipping")
-
-    # --- VIR PERCENTILES (no depth) ---
-    print("\n--- VIRs (no depth percentiles) ---")
-    vir_columns = get_vir_columns()
-    for col, name in vir_columns.items():
-        if col in df.columns:
-            print(f"  {col} -> {name}_exome_perc")
-            df = calculate_exome_percentile(df, col, name)
-        else:
-            print(f"  {col} - NOT FOUND, skipping")
-
-    # Extract max predictions from stacked arrays
+    # --- EXTRACT MAX PREDICTIONS FROM STACKED ARRAYS ---
     print("\n=== Extracting Max Predictions from Stacked Arrays ===")
-    for col in STACKED_PRED_COLUMNS:
-        if col in df.columns:
-            print(f"  {col} -> {col}_max_pred")
-            df = extract_max_pred(df, col)
-        else:
-            print(f"  {col} - NOT FOUND, skipping")
+    available_stacked = [col for col in STACKED_PRED_COLUMNS if col in df.columns]
+    print(f"  Stacked columns: {available_stacked}")
 
-    # Calculate exome percentiles for extracted predictions
+    max_pred_exprs = build_max_pred_exprs(df, STACKED_PRED_COLUMNS)
+    if max_pred_exprs:
+        df = df.with_columns(max_pred_exprs)
+        print(f"  Extracted {len(max_pred_exprs)} max_pred columns in parallel")
+
+    # Add max_pred columns to percentile calculation
     for col in STACKED_PRED_COLUMNS:
         max_col = f'{col}_max_pred'
         if max_col in df.columns:
-            print(f"  {max_col} -> {col}_exome_perc")
-            df = calculate_exome_percentile(df, max_col, col)
+            all_columns[max_col] = col
+
+    # --- EXOME-WIDE PERCENTILES (ALL AT ONCE) ---
+    print("\n=== Calculating Exome-Wide Percentiles (Parallel) ===")
+    percentile_exprs = build_percentile_exprs(df, all_columns)
+    print(f"  Building {len(percentile_exprs)} percentile expressions...")
+
+    if percentile_exprs:
+        df = df.with_columns(percentile_exprs)
+        print(f"  Calculated {len(percentile_exprs)} percentiles in parallel")
 
     # --- CROSS-NORMALIZED PERCENTILES ---
     print("\n=== Calculating Cross-Normalized Percentiles ===")
@@ -182,13 +171,11 @@ def main(input_path: str, output_path: str):
         cross_norm_count = df.filter(cross_norm_filter).height
         print(f"  Cross-norm positions: {cross_norm_count:,}")
 
-        # Calculate cross-norm percentiles
+        # Build all cross-norm percentile expressions at once
+        cross_norm_exprs = []
         for col, name in available_scores:
             perc_col = f'{name}_cross_norm_perc'
-            print(f"  {col} -> {perc_col}")
-
-            # Rank only among cross-norm positions, null otherwise
-            df = df.with_columns(
+            cross_norm_exprs.append(
                 pl.when(cross_norm_filter)
                 .then(
                     pl.col(col).rank(method='average').over(cross_norm_filter)
@@ -197,6 +184,9 @@ def main(input_path: str, output_path: str):
                 .otherwise(None)
                 .alias(perc_col)
             )
+
+        df = df.with_columns(cross_norm_exprs)
+        print(f"  Calculated {len(cross_norm_exprs)} cross-norm percentiles in parallel")
     else:
         print("  WARNING: Not all 6 scores available, skipping cross-norm percentiles")
         missing = [name for col, name in cross_norm_scores if col not in df.columns]
@@ -208,8 +198,8 @@ def main(input_path: str, output_path: str):
     print(f"  Columns: {len(df.columns)}")
 
     # Show new percentile columns
-    perc_cols = [c for c in df.columns if '_perc' in c]
-    print(f"  New percentile columns: {len(perc_cols)}")
+    perc_cols = [c for c in df.columns if '_perc' in c or '_max_pred' in c]
+    print(f"  New computed columns: {len(perc_cols)}")
     for c in sorted(perc_cols):
         print(f"    - {c}")
 
