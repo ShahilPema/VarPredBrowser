@@ -30,8 +30,14 @@ const BG_COLOR = 0xE4E0DD;
 // Sphere halo tag for state tree queries
 const SPHERE_HALO_TAG = 'residue-highlight-sphere';
 
+// Track overlay tag prefix for multiple sphere overlays
+const TRACK_OVERLAY_TAG_PREFIX = 'track-overlay-';
+
 // Global ref for the sphere state node
 let sphereHaloRef: string | null = null;
+
+// Track overlay refs: Map of trackId -> array of state refs
+const trackOverlayRefs: Map<string, string[]> = new Map();
 
 // Debug flag
 const DEBUG_HALO = true;
@@ -467,4 +473,229 @@ export function disableDefaultBehaviors(): void {
     } catch (e) {
         console.warn('[Mol*] Could not disable default behaviors:', e);
     }
+}
+
+/**
+ * Create track overlay spheres for multiple residues
+ * Used for visualizing variant tracks (ClinVar, Training, Constraint) on the 3D structure
+ *
+ * @param residueNumbers Array of residue numbers to highlight
+ * @param color Hex color value for the spheres
+ * @param trackId Unique identifier for this track overlay
+ * @param sizeFactor Size multiplier for spheres (default 3.0)
+ * @param alpha Transparency (default 0.7)
+ * @returns Array of state refs for the created spheres
+ */
+export async function createTrackOverlaySpheres(
+    residueNumbers: number[],
+    color: number,
+    trackId: string,
+    sizeFactor: number = 3.0,
+    alpha: number = 0.7
+): Promise<string[]> {
+    if (!plugin) {
+        console.warn('[OVERLAY] Plugin not available');
+        return [];
+    }
+
+    if (!residueNumbers || residueNumbers.length === 0) {
+        console.warn('[OVERLAY] No residue numbers provided');
+        return [];
+    }
+
+    const tag = TRACK_OVERLAY_TAG_PREFIX + trackId;
+    const sphereColor = Color(color);
+    const refs: string[] = [];
+
+    try {
+        // Remove any existing overlay for this track
+        await removeTrackOverlaySpheres(trackId);
+
+        // Find the structure in the state tree
+        let structureRef: string | null = null;
+        let structure: any = null;
+
+        plugin.state.data.cells.forEach((cell, ref) => {
+            if (cell.obj?.type?.name === 'Structure' && cell.obj?.data) {
+                structureRef = ref;
+                structure = cell.obj.data;
+            }
+        });
+
+        if (!structureRef || !structure) {
+            console.warn('[OVERLAY] No structure found in state tree');
+            return [];
+        }
+
+        console.log(`[OVERLAY] Creating spheres for ${residueNumbers.length} residues, track: ${trackId}`);
+
+        // Build selection expression for all residues
+        // Use residue-level selection with spacefill representation
+        const Bundle = StructureElement.Bundle;
+
+        if (!Bundle?.fromLoci || !StateTransforms?.Model?.StructureSelectionFromBundle) {
+            console.warn('[OVERLAY] Required APIs not available');
+            return [];
+        }
+
+        // Create a single combined loci for all residues
+        // This is more efficient than creating individual spheres
+        const model = structure.models?.[0];
+        if (!model) {
+            console.warn('[OVERLAY] No model found in structure');
+            return [];
+        }
+
+        // Build the update with representation for selected residues
+        const reprParams = {
+            type: {
+                name: 'spacefill' as const,
+                params: {
+                    sizeFactor: sizeFactor,
+                    alpha: alpha
+                }
+            },
+            colorTheme: { name: 'uniform' as const, params: { value: sphereColor } },
+            sizeTheme: { name: 'uniform' as const, params: { value: sizeFactor } }
+        };
+
+        // Create selection query for the residues
+        // Use MolScript-style residue selection
+        const { MolScriptBuilder: MS } = await import('molstar/lib/mol-script/language/builder');
+        const { compile } = await import('molstar/lib/mol-script/script');
+        const { Script } = await import('molstar/lib/mol-script/script');
+
+        // Build residue selection expression
+        const residueSet = new Set(residueNumbers);
+        const residueExpr = MS.struct.generator.atomGroups({
+            'residue-test': MS.core.set.has([
+                MS.set(...Array.from(residueSet)),
+                MS.ammp('auth_seq_id')
+            ])
+        });
+
+        const result = await plugin.build()
+            .to(structureRef)
+            .apply(StateTransforms.Model.StructureSelectionFromExpression, {
+                expression: residueExpr,
+                label: `Track Overlay: ${trackId}`
+            }, { tags: [tag] })
+            .apply(StateTransforms.Representation.StructureRepresentation3D, reprParams, { tags: [tag] })
+            .commit();
+
+        if (result?.ref) {
+            refs.push(result.ref);
+        }
+
+        // Store refs for this track
+        trackOverlayRefs.set(trackId, refs);
+
+        console.log(`[OVERLAY] Created overlay for track ${trackId}, refs:`, refs);
+        return refs;
+
+    } catch (e) {
+        console.error('[OVERLAY] Failed to create track overlay:', (e as Error).message, (e as Error).stack);
+        return [];
+    }
+}
+
+/**
+ * Remove track overlay spheres for a specific track
+ *
+ * @param trackId The track identifier to remove overlays for
+ */
+export async function removeTrackOverlaySpheres(trackId: string): Promise<void> {
+    if (!plugin) {
+        trackOverlayRefs.delete(trackId);
+        return;
+    }
+
+    const tag = TRACK_OVERLAY_TAG_PREFIX + trackId;
+
+    try {
+        const state = plugin.state.data;
+        const toDelete: string[] = [];
+
+        // Find all cells with this track's tag
+        state.cells.forEach((cell, ref) => {
+            if (cell.transform?.tags?.includes(tag)) {
+                toDelete.push(ref);
+            }
+        });
+
+        if (toDelete.length > 0) {
+            const update = plugin.build();
+            for (const ref of toDelete) {
+                update.delete(ref);
+            }
+            await update.commit();
+            console.log(`[OVERLAY] Removed ${toDelete.length} overlay(s) for track ${trackId}`);
+        }
+
+        trackOverlayRefs.delete(trackId);
+
+    } catch (e) {
+        console.warn('[OVERLAY] Error removing track overlay:', (e as Error).message);
+        trackOverlayRefs.delete(trackId);
+    }
+}
+
+/**
+ * Clear all track overlays from the structure
+ */
+export async function clearAllTrackOverlays(): Promise<void> {
+    if (!plugin) {
+        trackOverlayRefs.clear();
+        return;
+    }
+
+    try {
+        const state = plugin.state.data;
+        const toDelete: string[] = [];
+
+        // Find all cells with track overlay tags
+        state.cells.forEach((cell, ref) => {
+            const tags = cell.transform?.tags || [];
+            for (const t of tags) {
+                if (typeof t === 'string' && t.startsWith(TRACK_OVERLAY_TAG_PREFIX)) {
+                    toDelete.push(ref);
+                    break;
+                }
+            }
+        });
+
+        if (toDelete.length > 0) {
+            const update = plugin.build();
+            for (const ref of toDelete) {
+                update.delete(ref);
+            }
+            await update.commit();
+            console.log(`[OVERLAY] Cleared ${toDelete.length} track overlay(s)`);
+        }
+
+        trackOverlayRefs.clear();
+
+    } catch (e) {
+        console.warn('[OVERLAY] Error clearing track overlays:', (e as Error).message);
+        trackOverlayRefs.clear();
+    }
+}
+
+/**
+ * Check if a track currently has an overlay
+ *
+ * @param trackId The track identifier to check
+ * @returns true if the track has an active overlay
+ */
+export function hasTrackOverlay(trackId: string): boolean {
+    return trackOverlayRefs.has(trackId) && (trackOverlayRefs.get(trackId)?.length ?? 0) > 0;
+}
+
+/**
+ * Get all currently overlayed track IDs
+ *
+ * @returns Array of track IDs with active overlays
+ */
+export function getOverlayedTracks(): string[] {
+    return Array.from(trackOverlayRefs.keys());
 }

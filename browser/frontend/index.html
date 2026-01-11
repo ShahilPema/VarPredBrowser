@@ -26,6 +26,7 @@
         }
         
         .header {
+            display: none; /* Hidden to maximize screen space */
             background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
             padding: 20px 30px;
             border-bottom: 1px solid #0f3460;
@@ -58,6 +59,49 @@
             display: flex;
             align-items: center;
             gap: 8px;
+        }
+
+        /* Panel toggle buttons (Cursor-style) */
+        .panel-toggles {
+            display: flex;
+            gap: 2px;
+            margin-left: auto;
+            background: #1a1a2e;
+            border-radius: 6px;
+            padding: 3px;
+        }
+
+        .panel-btn {
+            width: 50px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 4px;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .panel-btn:hover {
+            background: #2a2a3e;
+            color: #aaa;
+        }
+
+        .panel-btn.active {
+            color: #e94560;
+        }
+
+        .panel-btn.active:hover {
+            background: #2a2a3e;
+            color: #e94560;
+        }
+
+        .panel-btn svg {
+            width: 50px;
+            height: 40px;
         }
 
         .autocomplete-dropdown {
@@ -463,12 +507,13 @@
             background: #e94560;
         }
         
-        /* Gene display banner */
+        /* Gene display banner - hidden to maximize screen space */
         .gene-display-banner {
+            display: none;
             background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
             padding: 12px 30px;
             border-bottom: 1px solid #0f3460;
-            display: flex;
+            /* display: flex; - uncomment to show banner */
             gap: 15px;
             align-items: center;
         }
@@ -562,24 +607,7 @@
         
         /* Panel toggle button */
         .panel-toggle {
-            position: absolute;
-            left: 300px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 24px;
-            height: 60px;
-            background: #16213e;
-            border: 1px solid #0f3460;
-            border-left: none;
-            border-radius: 0 6px 6px 0;
-            color: #e94560;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            transition: left 0.3s ease, width 0.2s ease;
-            font-size: 14px;
+            display: none !important; /* Hidden - using top bar buttons instead */
         }
 
         .panel-toggle:hover {
@@ -634,8 +662,11 @@
         }
         
         .structure-panel.collapsed {
-            width: 0;
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0;
             overflow: hidden;
+            border-left: none;
         }
 
         #structure-panel.collapsed ~ #right-divider {
@@ -843,31 +874,20 @@
         }
 
         .structure-toggle-btn {
-            position: fixed;
-            right: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 24px;
-            height: 60px;
-            background: #0f3460;
-            border: none;
-            border-radius: 6px 0 0 6px;
-            color: #ccc;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            transition: all 0.3s ease;
+            display: none !important; /* Hidden - using top bar buttons instead */
         }
-        
+
         .structure-toggle-btn:hover {
             background: #e94560;
             color: white;
+            width: 28px;
         }
-        
-        .structure-toggle-btn.hidden {
-            display: none;
+
+        .structure-toggle-btn.collapsed {
+            right: 0;
+            border-left: 1px solid #0f3460;
+            border-right: none;
+            border-radius: 6px 0 0 6px;
         }
         
         /* Highlighted residue marker */
@@ -1021,22 +1041,38 @@
             </div>
             <button id="search-btn">Go</button>
         </div>
-        <div class="control-group">
-            <label>Range:</label>
-            <input type="number" id="start-input" value="0" style="width: 80px;">
-            <span style="color: #666;">-</span>
-            <input type="number" id="end-input" value="1000" style="width: 80px;">
-            <button id="update-range-btn" class="secondary">Update</button>
-        </div>
-        <div class="control-group" style="border-left: 1px solid #0f3460; padding-left: 20px;">
-            <label>Navigate to AA:</label>
-            <input type="text" id="gene-aa-input" placeholder="Gene (e.g., TP53)" style="width: 100px;">
-            <input type="number" id="aa-start-input" placeholder="AA start" style="width: 80px;">
-            <input type="number" id="aa-end-input" placeholder="AA end" style="width: 80px;">
-            <button id="gene-aa-btn">Go to AA Range</button>
+        <!-- Panel toggle buttons (Cursor-style) -->
+        <div class="panel-toggles">
+            <button id="left-panel-btn" class="panel-btn active" title="Toggle track panel">
+                <svg viewBox="0 0 20 16" fill="currentColor">
+                    <!-- Outer screen rectangle -->
+                    <rect x="1" y="1" width="18" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+                    <!-- Left sidebar panel (inside, 1px smaller all around) -->
+                    <rect x="3.5" y="3.5" width="3" height="9" rx="0.5" />
+                </svg>
+            </button>
+            <button id="right-panel-btn" class="panel-btn active" title="Toggle 3D structure panel">
+                <svg viewBox="0 0 20 16" fill="currentColor">
+                    <!-- Outer screen rectangle -->
+                    <rect x="1" y="1" width="18" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+                    <!-- Right sidebar panel (inside, 1px smaller all around) -->
+                    <rect x="13.5" y="3.5" width="3" height="9" rx="0.5" />
+                </svg>
+            </button>
         </div>
     </div>
-    
+
+    <!-- Hidden inputs for internal state (removed from UI but still used by JS) -->
+    <div style="display: none;">
+        <input type="number" id="start-input" value="0">
+        <input type="number" id="end-input" value="1000">
+        <button id="update-range-btn"></button>
+        <input type="text" id="gene-aa-input">
+        <input type="number" id="aa-start-input">
+        <input type="number" id="aa-end-input">
+        <button id="gene-aa-btn"></button>
+    </div>
+
     <div class="main-container">
         <button id="panel-toggle" class="panel-toggle" title="Toggle track panel">◀</button>
         <div class="track-panel" id="track-panel">
@@ -1062,11 +1098,13 @@
         <!-- Right resize divider -->
         <div class="resize-divider" id="right-divider"></div>
 
+        <!-- Structure Panel Toggle (outside panel so it stays visible when collapsed) -->
+        <button class="structure-toggle-btn" id="structure-toggle-btn" title="Hide 3D structure panel">▶</button>
+
         <!-- Structure Panel (Mol* 3D Viewer) -->
         <div class="structure-panel" id="structure-panel">
             <div class="structure-panel-header">
                 <h3>3D Structure</h3>
-                <button class="close-btn" id="close-structure-btn" title="Close structure panel">×</button>
             </div>
             
             <div class="structure-controls" id="structure-controls">
@@ -1108,7 +1146,6 @@
         </div>
         
         <!-- Structure panel toggle button (shown when panel is closed) -->
-        <button class="structure-toggle-btn hidden" id="structure-toggle-btn" title="Show 3D structure">◀</button>
     </div>
     
     <div class="status-bar">
@@ -1130,12 +1167,17 @@
             resetCamera,
             subscribeToClicks,
             disableDefaultBehaviors,
+            createTrackOverlaySpheres,
+            removeTrackOverlaySpheres,
+            clearAllTrackOverlays,
+            hasTrackOverlay,
+            getOverlayedTracks,
             StateTransforms,
             StructureElement,
             Color
         } from './src/molstar-plugin.ts';
 
-        // Make available globally for debugging
+        // Make available globally for debugging and internal use
         window.molstarAPI = {
             initMolstarPlugin,
             getPlugin,
@@ -1146,6 +1188,11 @@
             resetCamera,
             subscribeToClicks,
             disableDefaultBehaviors,
+            createTrackOverlaySpheres,
+            removeTrackOverlaySpheres,
+            clearAllTrackOverlays,
+            hasTrackOverlay,
+            getOverlayedTracks,
             StateTransforms,
             StructureElement
         };
@@ -1168,7 +1215,7 @@
         ]);
         
         // State
-        let currentFilter = 'mis_count_gt0';
+        let currentFilter = 'missense_only';
         let currentRange = [0, 1000];
         let selectedTracks = ['rgc_mis_count'];  // Array to maintain order
         let trackData = {};
@@ -1862,9 +1909,33 @@
             return trackId === 'AlphaMissense_stacked' || trackId === 'ESM1b_stacked';
         }
 
+        // Determine if track is a ClinVar variants track (new struct format)
+        function isClinVarVariantsTrack(trackId) {
+            return trackId === 'clinvar_variants';
+        }
+
+        // Determine if track is a variant frequency track
+        function isVariantFrequencyTrack(trackId) {
+            return trackId === 'rgc_variants' ||
+                   trackId === 'gnomad_exomes_variants' ||
+                   trackId === 'gnomad_genomes_variants';
+        }
+
+        // Determine if track is a coverage track
+        function isCoverageTrack(trackId) {
+            return trackId.startsWith('gnomad_exomes_') && (trackId.includes('mean') || trackId.includes('median') || trackId.includes('over_')) ||
+                   trackId.startsWith('gnomad_genomes_') && (trackId.includes('mean') || trackId.includes('median') || trackId.includes('over_'));
+        }
+
+        // Coverage track colors
+        const COVERAGE_COLORS = {
+            'exome': 'rgba(66, 133, 244, 0.7)',   // Blue with transparency
+            'genome': 'rgba(52, 168, 83, 0.7)'   // Green with transparency
+        };
+
         // Determine if track is any ClinVar track
         function isClinVarTrack(trackId) {
-            return trackId.startsWith('clinvar.');
+            return trackId.startsWith('clinvar.') || trackId === 'clinvar_variants';
         }
 
         // Determine if track is a training labels track
@@ -1960,13 +2031,205 @@
             const csqArray = positionData['variant_consequences'];
             if (!csqArray || !Array.isArray(csqArray)) return null;
 
-            // Find the consequence for this allele
+            // Find the consequence for this allele (using new struct fields: alt, csq)
             for (const csq of csqArray) {
-                if (csq && csq._0 === allele) {
-                    return csq._1;  // Return the consequence category
+                if (csq && csq.alt === allele) {
+                    return csq.csq;  // Return the consequence category
                 }
             }
             return null;
+        }
+
+        // Variant frequency track constants
+        const COHORT_COLORS = {
+            'gnomad_exomes_variants': '#4285F4',   // Blue
+            'gnomad_genomes_variants': '#34A853',  // Green
+            'rgc_variants': '#FF6D00'              // Orange
+        };
+
+        // Filter state for variant frequencies (show non-PASS variants)
+        let showFilteredVariants = true;
+
+        // Track overlay state for 3D structure visualization
+        // Max 2 overlays allowed at once
+        const TRACK_OVERLAY_COLORS = [0x0066CC, 0x00CED1];  // Blue, Cyan
+        const TRACK_OVERLAY_COLOR_NAMES = ['#0066CC', '#00CED1'];
+        let trackOverlayState = {
+            overlayedTracks: [],  // [{trackId, colorSlot}], max 2
+            sphereRefs: new Map()
+        };
+
+        // Check if a track is eligible for sphere overlay
+        function isEligibleForSphereOverlay(trackId) {
+            return isClinVarVariantsTrack(trackId) ||
+                   isTrainingTrack(trackId) ||
+                   isConstraintStackedTrack(trackId);
+        }
+
+        // Get residues that have data for a track
+        function getResiduesWithTrackData(trackId) {
+            if (!currentData || !currentData.track_data) return [];
+
+            const trackData = currentData.track_data[trackId];
+            if (!trackData) return [];
+
+            const residuesWithData = new Set();
+            const positions = Object.keys(trackData);
+
+            for (const pos of positions) {
+                const value = trackData[pos];
+
+                // Check if position has valid data
+                let hasData = false;
+
+                if (isClinVarVariantsTrack(trackId)) {
+                    // ClinVar: check if any variants pass the filter
+                    if (Array.isArray(value) && value.length > 0) {
+                        for (const v of value) {
+                            if (v.significance && clinvarLabelPassesFilter(v.significance)) {
+                                hasData = true;
+                                break;
+                            }
+                        }
+                    }
+                } else if (isTrainingTrack(trackId)) {
+                    // Training: check for non-zero count
+                    if (value && value > 0) hasData = true;
+                } else if (isConstraintStackedTrack(trackId)) {
+                    // Constraint: check if array has variants
+                    if (Array.isArray(value) && value.length > 0) hasData = true;
+                }
+
+                if (hasData) {
+                    // Map filtered position to protein residue
+                    const filteredIdx = parseInt(pos);
+                    const positionData = currentData.positions?.find(p => p.filtered_idx === filteredIdx);
+                    if (positionData && positionData.protein_residue) {
+                        residuesWithData.add(positionData.protein_residue);
+                    }
+                }
+            }
+
+            return Array.from(residuesWithData);
+        }
+
+        // Add track overlay
+        async function addTrackOverlay(trackId) {
+            if (!window.molstarLoaded) {
+                console.warn('[OVERLAY] Mol* not loaded');
+                return;
+            }
+
+            // Check max overlays
+            if (trackOverlayState.overlayedTracks.length >= 2) {
+                console.warn('[OVERLAY] Maximum 2 overlays allowed');
+                return;
+            }
+
+            // Check if already overlayed
+            if (trackOverlayState.overlayedTracks.some(t => t.trackId === trackId)) {
+                console.log('[OVERLAY] Track already overlayed:', trackId);
+                return;
+            }
+
+            // Find next available color slot
+            const usedSlots = new Set(trackOverlayState.overlayedTracks.map(t => t.colorSlot));
+            let colorSlot = 0;
+            if (usedSlots.has(0)) colorSlot = 1;
+
+            // Get residues with data
+            const residues = getResiduesWithTrackData(trackId);
+            if (residues.length === 0) {
+                console.warn('[OVERLAY] No residues with data for track:', trackId);
+                return;
+            }
+
+            console.log(`[OVERLAY] Adding overlay for ${trackId} with ${residues.length} residues, color slot ${colorSlot}`);
+
+            try {
+                const refs = await createTrackOverlaySpheres(
+                    residues,
+                    TRACK_OVERLAY_COLORS[colorSlot],
+                    trackId,
+                    3.0,  // sizeFactor
+                    0.7   // alpha
+                );
+
+                trackOverlayState.overlayedTracks.push({ trackId, colorSlot });
+                trackOverlayState.sphereRefs.set(trackId, refs);
+
+                // Update UI
+                updateTrackOverlayButtons();
+            } catch (e) {
+                console.error('[OVERLAY] Failed to add overlay:', e);
+            }
+        }
+
+        // Remove track overlay
+        async function removeTrackOverlay(trackId) {
+            if (!window.molstarLoaded) return;
+
+            const idx = trackOverlayState.overlayedTracks.findIndex(t => t.trackId === trackId);
+            if (idx === -1) return;
+
+            try {
+                await removeTrackOverlaySpheres(trackId);
+                trackOverlayState.overlayedTracks.splice(idx, 1);
+                trackOverlayState.sphereRefs.delete(trackId);
+
+                // Update UI
+                updateTrackOverlayButtons();
+            } catch (e) {
+                console.error('[OVERLAY] Failed to remove overlay:', e);
+            }
+        }
+
+        // Update track overlay spheres when filters change
+        async function updateTrackOverlaySpheres(trackId) {
+            if (!window.molstarLoaded) return;
+
+            const overlay = trackOverlayState.overlayedTracks.find(t => t.trackId === trackId);
+            if (!overlay) return;
+
+            const residues = getResiduesWithTrackData(trackId);
+            console.log(`[OVERLAY] Updating overlay for ${trackId} with ${residues.length} residues`);
+
+            try {
+                await removeTrackOverlaySpheres(trackId);
+
+                if (residues.length > 0) {
+                    const refs = await createTrackOverlaySpheres(
+                        residues,
+                        TRACK_OVERLAY_COLORS[overlay.colorSlot],
+                        trackId,
+                        3.0,
+                        0.7
+                    );
+                    trackOverlayState.sphereRefs.set(trackId, refs);
+                }
+            } catch (e) {
+                console.error('[OVERLAY] Failed to update overlay:', e);
+            }
+        }
+
+        // Update overlay buttons in track headers
+        function updateTrackOverlayButtons() {
+            document.querySelectorAll('.track-overlay-btn').forEach(btn => {
+                const trackId = btn.dataset.trackId;
+                const isOverlayed = trackOverlayState.overlayedTracks.some(t => t.trackId === trackId);
+                const overlay = trackOverlayState.overlayedTracks.find(t => t.trackId === trackId);
+
+                btn.classList.toggle('active', isOverlayed);
+                if (isOverlayed && overlay) {
+                    btn.style.backgroundColor = TRACK_OVERLAY_COLOR_NAMES[overlay.colorSlot];
+                    btn.style.color = 'white';
+                    btn.title = 'Remove 3D overlay';
+                } else {
+                    btn.style.backgroundColor = '';
+                    btn.style.color = '';
+                    btn.title = 'Show on 3D structure';
+                }
+            });
         }
 
         function getClinVarColor(label) {
@@ -2030,13 +2293,23 @@
             }
         }
         
-        // Load track list
+        // Load track list from API
         async function loadTracks() {
             const container = document.getElementById('track-list');
             container.innerHTML = '';
-            // Transform tree to include percentile versions for O/E tracks
-            const treeWithPercentiles = addPercentileVersions(TRACK_TREE);
-            renderTrackTree(treeWithPercentiles, container);
+            try {
+                // Fetch track tree from backend API
+                const response = await fetch(`${API_BASE}/api/track-tree`);
+                const trackTree = await response.json();
+                // Transform tree to include percentile versions for O/E tracks
+                const treeWithPercentiles = addPercentileVersions(trackTree);
+                renderTrackTree(treeWithPercentiles, container);
+            } catch (e) {
+                console.error('Failed to load track tree:', e);
+                // Fallback to hardcoded tree if API fails
+                const treeWithPercentiles = addPercentileVersions(TRACK_TREE);
+                renderTrackTree(treeWithPercentiles, container);
+            }
             document.getElementById('track-count').textContent = `(${selectedTracks.length} selected)`;
             updateSelectedTracksList();
         }
@@ -2098,50 +2371,23 @@
                     `;
                     filterContainer.addEventListener('click', (e) => e.stopPropagation());
                     filterContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                        cb.addEventListener('change', (e) => {
+                        cb.addEventListener('change', async (e) => {
                             const labelKey = e.target.dataset.clinvarLabel;
                             clinvarLabelFilter[labelKey] = e.target.checked;
                             // Re-render if ClinVar track is selected
-                            if (selectedTracks.includes('clinvar.clinvar_label_list')) {
+                            if (selectedTracks.includes('clinvar.clinvar_label_list') ||
+                                selectedTracks.includes('clinvar_variants')) {
                                 renderChart();
+                            }
+                            // Update 3D overlay if clinvar_variants is overlayed
+                            if (trackOverlayState.overlayedTracks.some(t => t.trackId === 'clinvar_variants')) {
+                                await updateTrackOverlaySpheres('clinvar_variants');
                             }
                         });
                     });
                     childrenEl.appendChild(filterContainer);
                 }
 
-                // Special handling for Constraint Predictions node - add consequence filter checkboxes
-                if (node.label === 'Constraint Predictions') {
-                    const filterContainer = document.createElement('div');
-                    filterContainer.className = 'clinvar-filter-container';
-                    filterContainer.innerHTML = `
-                        <div class="clinvar-filter-header">Filter by consequence:</div>
-                        <div class="clinvar-filter-options">
-                            ${Object.entries(consequenceFilter).map(([csqKey, enabled]) => {
-                                const info = CONSEQUENCE_CATEGORIES[csqKey] || { abbrev: csqKey, color: '#666' };
-                                return `
-                                    <label class="clinvar-filter-option" style="border-left: 3px solid ${info.color};" title="${info.description || ''}">
-                                        <input type="checkbox" data-consequence="${csqKey}" ${enabled ? 'checked' : ''}>
-                                        <span>${info.abbrev}</span>
-                                    </label>
-                                `;
-                            }).join('')}
-                        </div>
-                    `;
-                    filterContainer.addEventListener('click', (e) => e.stopPropagation());
-                    filterContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                        cb.addEventListener('change', (e) => {
-                            const csqKey = e.target.dataset.consequence;
-                            consequenceFilter[csqKey] = e.target.checked;
-                            // Re-render if any constraint track is selected
-                            if (selectedTracks.some(t => isConstraintStackedTrack(t))) {
-                                renderChart();
-                            }
-                        });
-                    });
-                    childrenEl.appendChild(filterContainer);
-                }
-                
                 node.children.forEach(child => renderTreeNode(child, childrenEl, false));
                 
                 header.addEventListener('click', () => {
@@ -2173,6 +2419,7 @@
                 
                 const input = document.createElement('input');
                 input.type = 'checkbox';
+                input.dataset.fieldId = node.fieldId;  // For syncing when track is removed via X button
                 input.checked = selectedTracks.includes(node.fieldId);
                 input.addEventListener('change', () => {
                     const idx = selectedTracks.indexOf(node.fieldId);
@@ -2281,6 +2528,9 @@
                     const idx = selectedTracks.indexOf(trackId);
                     if (idx >= 0) {
                         selectedTracks.splice(idx, 1);
+                        // Uncheck the checkbox in the track tree
+                        const checkbox = document.querySelector(`input[data-field-id="${trackId}"]`);
+                        if (checkbox) checkbox.checked = false;
                         // Update the track chip in the main list
                         const chip = document.querySelector(`.track-chip[data-track="${trackId}"]`);
                         if (chip) chip.classList.remove('selected');
@@ -2653,6 +2903,239 @@
                     });
                 });
             }
+
+            // Draw variant frequency ellipses (gnomAD style)
+            drawVariantFrequency(variantData, xScale, barWidth, trackId) {
+                this.clear();
+                const ctx = this.ctx;
+                const centerY = this.height / 2;
+                const color = COHORT_COLORS[trackId] || '#666666';
+
+                variantData.forEach((d, i) => {
+                    const variants = d.variants || [];
+                    const x = xScale(d.filtered_idx);
+
+                    if (variants.length === 0) {
+                        // No variants - draw thin gray line
+                        ctx.fillStyle = '#cccccc';
+                        ctx.fillRect(x, centerY - 1, Math.ceil(Math.max(1, barWidth)) + 0.5, 2);
+                        return;
+                    }
+
+                    variants.forEach((variant, vIdx) => {
+                        if (!variant || variant.af === null || variant.af === undefined) return;
+
+                        // Check filter status
+                        const isFiltered = variant.filters && variant.filters.length > 0;
+                        if (isFiltered && !showFilteredVariants) return;
+
+                        // Calculate ellipse size from AF (log scale)
+                        // AF range: 1e-6 to 1, map to radius 2-15
+                        const af = Math.max(variant.af, 1e-7);
+                        const logAf = Math.log10(af);  // -7 to 0
+                        const normalizedAf = (logAf + 7) / 7;  // 0 to 1
+                        const ry = 2 + normalizedAf * 13;  // 2 to 15
+                        const rx = Math.max(1.5, barWidth / 3);
+
+                        // Offset multiple variants vertically
+                        const offsetY = (vIdx - (variants.length - 1) / 2) * (ry + 2);
+
+                        // Draw ellipse
+                        ctx.beginPath();
+                        ctx.ellipse(x + barWidth / 2, centerY + offsetY, rx, ry, 0, 0, 2 * Math.PI);
+
+                        if (isFiltered) {
+                            // Filtered: hollow with dashed stroke
+                            ctx.strokeStyle = color;
+                            ctx.setLineDash([2, 2]);
+                            ctx.lineWidth = 1.5;
+                            ctx.stroke();
+                            ctx.setLineDash([]);
+                        } else {
+                            // PASS: filled solid
+                            ctx.fillStyle = color;
+                            ctx.fill();
+                            ctx.strokeStyle = '#333';
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                        }
+                    });
+                });
+            }
+
+            // Draw ClinVar variants with significance colors
+            drawClinVarVariants(variantData, xScale, barWidth) {
+                this.clear();
+                const ctx = this.ctx;
+                const barHeight = this.height - 15;
+                const centerY = this.height / 2;
+
+                variantData.forEach((d, i) => {
+                    const x = xScale(d.filtered_idx);
+                    const variants = d.variants || [];
+
+                    if (variants.length === 0) {
+                        // No ClinVar data - draw gray bar
+                        ctx.fillStyle = '#555555';
+                        ctx.fillRect(x, 5, Math.ceil(Math.max(1, barWidth)) + 0.5, barHeight);
+                        return;
+                    }
+
+                    // Filter variants by current significance filter
+                    const filteredVariants = variants.filter(v => {
+                        return clinvarLabelPassesFilter(v.significance || 'other');
+                    });
+
+                    if (filteredVariants.length === 0) {
+                        ctx.fillStyle = '#555555';
+                        ctx.fillRect(x, 5, Math.ceil(Math.max(1, barWidth)) + 0.5, barHeight);
+                        return;
+                    }
+
+                    // Draw each variant as a colored symbol
+                    const symbolSize = Math.max(4, barWidth * 0.8);
+                    filteredVariants.forEach((variant, vIdx) => {
+                        const offsetY = (vIdx - (filteredVariants.length - 1) / 2) * (symbolSize + 2);
+                        const cx = x + barWidth / 2;
+                        const cy = centerY + offsetY;
+
+                        // Get color from significance
+                        const color = getClinVarColor(variant.significance || 'other');
+                        ctx.fillStyle = color;
+                        ctx.strokeStyle = '#333';
+                        ctx.lineWidth = 0.5;
+
+                        // Draw shape based on molecular consequence
+                        const csq = variant.mol_csq || '';
+                        if (csq.includes('frameshift') || csq.includes('stop_gained') || csq.includes('splice_acceptor') || csq.includes('splice_donor')) {
+                            // pLoF: Cross/X
+                            const half = symbolSize / 2;
+                            ctx.lineWidth = 2;
+                            ctx.strokeStyle = color;
+                            ctx.beginPath();
+                            ctx.moveTo(cx - half, cy - half);
+                            ctx.lineTo(cx + half, cy + half);
+                            ctx.moveTo(cx + half, cy - half);
+                            ctx.lineTo(cx - half, cy + half);
+                            ctx.stroke();
+                            ctx.lineWidth = 0.5;
+                            ctx.strokeStyle = '#333';
+                        } else if (csq.includes('missense') || csq.includes('inframe')) {
+                            // Missense: Triangle
+                            const half = symbolSize / 2;
+                            ctx.beginPath();
+                            ctx.moveTo(cx, cy - half);
+                            ctx.lineTo(cx + half, cy + half);
+                            ctx.lineTo(cx - half, cy + half);
+                            ctx.closePath();
+                            ctx.fill();
+                            ctx.stroke();
+                        } else if (csq.includes('splice_region')) {
+                            // Splice region: Diamond
+                            const half = symbolSize / 2;
+                            ctx.beginPath();
+                            ctx.moveTo(cx, cy - half);
+                            ctx.lineTo(cx + half, cy);
+                            ctx.lineTo(cx, cy + half);
+                            ctx.lineTo(cx - half, cy);
+                            ctx.closePath();
+                            ctx.fill();
+                            ctx.stroke();
+                        } else {
+                            // Other: Circle
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, symbolSize / 2, 0, 2 * Math.PI);
+                            ctx.fill();
+                            ctx.stroke();
+                        }
+                    });
+                });
+            }
+
+            // Draw coverage area chart (gnomAD style)
+            drawCoverageArea(positionsData, values, xScale, barWidth, trackId) {
+                this.clear();
+                const ctx = this.ctx;
+                const barHeight = this.height - 15;
+                const topPadding = 5;
+
+                // Determine color based on exome vs genome
+                const isExome = trackId.includes('exomes');
+                const fillColor = isExome ? COVERAGE_COLORS.exome : COVERAGE_COLORS.genome;
+                const strokeColor = isExome ? 'rgba(66, 133, 244, 1)' : 'rgba(52, 168, 83, 1)';
+
+                // For coverage tracks, values are fractions (0-1) or raw coverage values
+                // Determine max value for scaling
+                const isOverTrack = trackId.includes('over_');
+                const yMax = isOverTrack ? 1.0 : Math.max(...values.filter(v => v !== null && !isNaN(v)), 100);
+
+                // Build path for area chart
+                ctx.beginPath();
+                ctx.fillStyle = fillColor;
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = 1;
+
+                let started = false;
+                let lastX = 0;
+                let lastY = topPadding + barHeight;
+
+                positionsData.forEach((d, i) => {
+                    const x = xScale(d.filtered_idx);
+                    const value = values[i];
+
+                    if (value === null || value === undefined || isNaN(value)) {
+                        return;
+                    }
+
+                    // Calculate y position (0 at bottom, max at top)
+                    const normalizedValue = Math.min(value / yMax, 1);
+                    const y = topPadding + barHeight - (normalizedValue * barHeight);
+
+                    if (!started) {
+                        ctx.moveTo(x, topPadding + barHeight);  // Start at baseline
+                        ctx.lineTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+
+                    lastX = x + barWidth;
+                    lastY = y;
+                });
+
+                // Close the path back to baseline
+                if (started) {
+                    ctx.lineTo(lastX, topPadding + barHeight);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Draw top stroke only
+                    ctx.beginPath();
+                    let strokeStarted = false;
+                    positionsData.forEach((d, i) => {
+                        const x = xScale(d.filtered_idx);
+                        const value = values[i];
+                        if (value === null || value === undefined || isNaN(value)) return;
+                        const normalizedValue = Math.min(value / yMax, 1);
+                        const y = topPadding + barHeight - (normalizedValue * barHeight);
+                        if (!strokeStarted) {
+                            ctx.moveTo(x, y);
+                            strokeStarted = true;
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    ctx.stroke();
+                }
+
+                // Draw y-axis baseline
+                ctx.strokeStyle = '#666';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(0, topPadding + barHeight);
+                ctx.lineTo(this.width, topPadding + barHeight);
+                ctx.stroke();
+            }
         }
 
         // Main render function with zoom support (Canvas-based)
@@ -2753,6 +3236,9 @@
                 // Check track types
                 const isDomain = isDomainTrack(trackId);
                 const isClinVarStacked = isClinVarStackedTrack(trackId);
+                const isClinVarVariants = isClinVarVariantsTrack(trackId);
+                const isVariantFrequency = isVariantFrequencyTrack(trackId);
+                const isCoverage = isCoverageTrack(trackId);
                 const isClinVar = isClinVarTrack(trackId);
                 const isTraining = isTrainingTrack(trackId);
                 const isConstraintStacked = isConstraintStackedTrack(trackId);
@@ -2770,11 +3256,12 @@
                         }
 
                         // Extract variants from the array, filtering by consequence
+                        // Using new struct format: {alt, pred, n_pred}
                         const variants = [];
                         for (const v of variantArray) {
-                            if (v && v._0 && v._1 !== null && v._1 !== undefined) {
-                                const allele = v._0;
-                                const pred = v._1;
+                            if (v && v.alt && v.pred !== null && v.pred !== undefined) {
+                                const allele = v.alt;
+                                const pred = v.pred;
 
                                 // Look up consequence for this allele
                                 const csq = getConsequenceForAllele(d, allele);
@@ -2802,6 +3289,7 @@
                     });
                 } else if (isDbNSFPStacked) {
                     // dbNSFP stacked tracks: extract variant data with score and percentile
+                    // Using new struct format: {alt, score, percentile}
                     values = positionsData.map(d => {
                         const variantArray = d[trackId];
                         if (!variantArray || !Array.isArray(variantArray)) {
@@ -2810,11 +3298,11 @@
 
                         const variants = [];
                         for (const v of variantArray) {
-                            if (v && v._0 && v._1 !== null && v._1 !== undefined) {
+                            if (v && v.alt && v.score !== null && v.score !== undefined) {
                                 variants.push({
-                                    allele: v._0,
-                                    score: v._1,
-                                    percentile: v._2 || null
+                                    allele: v.alt,
+                                    score: v.score,
+                                    percentile: v.percentile || null
                                 });
                             }
                         }
@@ -2825,6 +3313,32 @@
                         return {
                             filtered_idx: d.filtered_idx,
                             variants: variants
+                        };
+                    });
+                } else if (isClinVarVariants) {
+                    // ClinVar variants track: data comes from API with variants array
+                    // Format: {filtered_idx, variants: [{alt, significance, status, mol_csq, variation_id}, ...]}
+                    values = positionsData.map(d => {
+                        const variantArray = d[trackId];
+                        if (!variantArray || !Array.isArray(variantArray)) {
+                            return { filtered_idx: d.filtered_idx, variants: [] };
+                        }
+                        return {
+                            filtered_idx: d.filtered_idx,
+                            variants: variantArray
+                        };
+                    });
+                } else if (isVariantFrequency) {
+                    // Variant frequency track: data comes from API with variants array
+                    // Format: {filtered_idx, variants: [{alt, af, ac, an, filters}, ...]}
+                    values = positionsData.map(d => {
+                        const variantArray = d[trackId];
+                        if (!variantArray || !Array.isArray(variantArray)) {
+                            return { filtered_idx: d.filtered_idx, variants: [] };
+                        }
+                        return {
+                            filtered_idx: d.filtered_idx,
+                            variants: variantArray
                         };
                     });
                 } else {
@@ -2891,12 +3405,20 @@
                         .range(isFlipped ? baseRange.slice().reverse() : baseRange)
                         .clamp(true);
                     legendType = 'dbnsfp_stacked';
+                } else if (isClinVarVariants) {
+                    // ClinVar variants: colors determined by significance (in drawing method)
+                    colorScale = (val) => '#e74c3c';  // Default red, actual color per-variant
+                    legendType = 'clinvar_variants';
+                } else if (isVariantFrequency) {
+                    // Variant frequency: colors by cohort (in drawing method)
+                    colorScale = (val) => COHORT_COLORS[trackId] || '#666666';
+                    legendType = 'variant_frequency';
                 } else if (isDomain) {
                     // Domain track: green for present, dark gray for absent
                     colorScale = (val) => val > 0 ? '#00b894' : '#555555';
                     legendType = 'domain';
                 } else if (isClinVarStacked) {
-                    // ClinVar stacked: special handling (colors determined by labels)
+                    // ClinVar stacked (legacy): special handling (colors determined by labels)
                     colorScale = (val) => val > 0 ? '#e74c3c' : '#555555';
                     legendType = 'clinvar';
                 } else if (isTraining || isCounts || isObserved || isComparator || trackId.startsWith('dbnsfp.') || isRGCSummaryTrack(trackId)) {
@@ -2982,6 +3504,27 @@
                         xScaleZoomed,
                         barWidth * currentZoomTransform.k
                     );
+                } else if (isClinVarVariants) {
+                    trackCanvas.drawClinVarVariants(
+                        values,
+                        xScaleZoomed,
+                        barWidth * currentZoomTransform.k
+                    );
+                } else if (isVariantFrequency) {
+                    trackCanvas.drawVariantFrequency(
+                        values,
+                        xScaleZoomed,
+                        barWidth * currentZoomTransform.k,
+                        trackId
+                    );
+                } else if (isCoverage) {
+                    trackCanvas.drawCoverageArea(
+                        positionsData,
+                        values,
+                        xScaleZoomed,
+                        barWidth * currentZoomTransform.k,
+                        trackId
+                    );
                 } else if (isDomain && trackId === 'domains') {
                     trackCanvas.drawDomains(
                         positionsData,
@@ -3016,6 +3559,9 @@
                     colorScale,
                     isDomain,
                     isClinVarStacked,
+                    isClinVarVariants,
+                    isVariantFrequency,
+                    isCoverage,
                     isConstraintStacked,
                     isDbNSFPStacked,
                     usesHeightBars,
@@ -3297,6 +3843,57 @@
                         }
                     });
                 }
+
+                // Add 3D overlay button for eligible tracks
+                if (isEligibleForSphereOverlay(trackId) && window.molstarLoaded) {
+                    const isOverlayed = trackOverlayState.overlayedTracks.some(t => t.trackId === trackId);
+                    const overlay = trackOverlayState.overlayedTracks.find(t => t.trackId === trackId);
+
+                    // Position after flip button if present, otherwise after colorbar
+                    const xOffset = (legendType === 'continuous' || legendType === 'constraint_stacked' || legendType === 'dbnsfp_stacked')
+                        ? colorbarWidth + 55  // After flip button
+                        : colorbarWidth + 35; // After colorbar
+
+                    const overlayBtn = colorbarG.append('g')
+                        .attr('class', 'overlay-btn')
+                        .attr('transform', `translate(${xOffset}, ${colorbarHeight / 2})`)
+                        .style('cursor', 'pointer');
+
+                    overlayBtn.append('circle')
+                        .attr('r', 8)
+                        .attr('fill', isOverlayed && overlay ? TRACK_OVERLAY_COLOR_NAMES[overlay.colorSlot] : '#444')
+                        .attr('stroke', '#666')
+                        .attr('stroke-width', 1);
+
+                    overlayBtn.append('text')
+                        .attr('text-anchor', 'middle')
+                        .attr('dominant-baseline', 'middle')
+                        .attr('font-size', '0.55rem')
+                        .attr('fill', '#fff')
+                        .attr('pointer-events', 'none')
+                        .text('3D');
+
+                    overlayBtn.append('title').text(isOverlayed ? 'Remove 3D overlay' : 'Show on 3D structure');
+
+                    // Store trackId on the button for later updates
+                    overlayBtn.node().dataset = { trackId: trackId };
+                    overlayBtn.classed('track-overlay-btn', true);
+
+                    overlayBtn.on('click', async function(event) {
+                        event.stopPropagation();
+                        const isCurrentlyOverlayed = trackOverlayState.overlayedTracks.some(t => t.trackId === trackId);
+                        if (isCurrentlyOverlayed) {
+                            await removeTrackOverlay(trackId);
+                        } else {
+                            if (trackOverlayState.overlayedTracks.length >= 2) {
+                                alert('Maximum 2 track overlays allowed. Remove one first.');
+                                return;
+                            }
+                            await addTrackOverlay(trackId);
+                        }
+                        renderChart();  // Re-render to update button state
+                    });
+                }
               } catch (error) {
                 console.error(`Error rendering track ${trackId}:`, error);
               }
@@ -3481,7 +4078,7 @@
                         const newBarWidth = Math.max(1, (width / positionsData.length) * event.transform.k);
                         
                         // Redraw all track canvases
-                        trackCanvases.forEach(({ canvas, trackId, values, colorScale, isClinVarStacked, isDomain, isConstraintStacked, isDbNSFPStacked, usesHeightBars, yMax, yMin }) => {
+                        trackCanvases.forEach(({ canvas, trackId, values, colorScale, isClinVarStacked, isClinVarVariants, isVariantFrequency, isCoverage, isDomain, isConstraintStacked, isDbNSFPStacked, usesHeightBars, yMax, yMin }) => {
                             // Use specialized drawing method based on track type
                             if (isConstraintStacked) {
                                 canvas.drawConstraintStacked(values, newXScale, colorScale, newBarWidth);
@@ -3490,6 +4087,12 @@
                                 canvas.drawDbNSFPStacked(values, newXScale, colorScale, newBarWidth, scoreRange);
                             } else if (isClinVarStacked) {
                                 canvas.drawClinVarStacked(positionsData, newXScale, newBarWidth);
+                            } else if (isClinVarVariants) {
+                                canvas.drawClinVarVariants(values, newXScale, newBarWidth);
+                            } else if (isVariantFrequency) {
+                                canvas.drawVariantFrequency(values, newXScale, newBarWidth, trackId);
+                            } else if (isCoverage) {
+                                canvas.drawCoverageArea(positionsData, values, newXScale, newBarWidth, trackId);
                             } else if (isDomain && trackId === 'domains') {
                                 canvas.drawDomains(positionsData, newXScale, newBarWidth);
                             } else if (usesHeightBars) {
@@ -4120,16 +4723,37 @@
             if (e.key === 'Enter') navigateToGeneAA();
         });
         
-        // Panel toggle
+        // Panel toggle (old edge button - kept for backwards compatibility)
         document.getElementById('panel-toggle').addEventListener('click', () => {
+            toggleLeftPanel();
+        });
+
+        // Top bar panel toggle buttons (Cursor-style)
+        document.getElementById('left-panel-btn').addEventListener('click', () => {
+            toggleLeftPanel();
+        });
+
+        document.getElementById('right-panel-btn').addEventListener('click', () => {
+            const panel = document.getElementById('structure-panel');
+            const isCollapsed = panel.classList.contains('collapsed');
+            toggleStructurePanel(isCollapsed);
+            // Update button active state
+            document.getElementById('right-panel-btn').classList.toggle('active', isCollapsed);
+        });
+
+        function toggleLeftPanel() {
             const panel = document.getElementById('track-panel');
             const toggle = document.getElementById('panel-toggle');
+            const leftPanelBtn = document.getElementById('left-panel-btn');
 
             panel.classList.toggle('collapsed');
             toggle.classList.toggle('collapsed');
 
             // Update arrow direction
             toggle.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+
+            // Update top bar button active state
+            leftPanelBtn.classList.toggle('active', !panel.classList.contains('collapsed'));
 
             // Update toggle position
             if (panel.classList.contains('collapsed')) {
@@ -4144,8 +4768,8 @@
             setTimeout(() => {
                 if (positionsData.length > 0) renderChart();
             }, 350);
-        });
-        
+        }
+
         // Window resize
         window.addEventListener('resize', () => {
             if (positionsData.length > 0) renderChart();
@@ -4525,13 +5149,11 @@
         ];
         
         function initStructurePanel() {
-            // Structure panel toggle
-            document.getElementById('close-structure-btn').addEventListener('click', () => {
-                toggleStructurePanel(false);
-            });
-
+            // Structure panel toggle - single button that toggles both ways
             document.getElementById('structure-toggle-btn').addEventListener('click', () => {
-                toggleStructurePanel(true);
+                const panel = document.getElementById('structure-panel');
+                const isCollapsed = panel.classList.contains('collapsed');
+                toggleStructurePanel(isCollapsed);
             });
 
             // Color scheme dropdown
@@ -4580,14 +5202,26 @@
         function toggleStructurePanel(show) {
             const panel = document.getElementById('structure-panel');
             const toggleBtn = document.getElementById('structure-toggle-btn');
+            const rightPanelBtn = document.getElementById('right-panel-btn');
 
             if (show) {
                 panel.classList.remove('collapsed');
-                toggleBtn.classList.add('hidden');
+                toggleBtn.classList.remove('collapsed');
+                toggleBtn.textContent = '▶';  // Arrow pointing right (to collapse)
+                toggleBtn.title = 'Hide 3D structure panel';
+                rightPanelBtn?.classList.add('active');
             } else {
                 panel.classList.add('collapsed');
-                toggleBtn.classList.remove('hidden');
+                toggleBtn.classList.add('collapsed');
+                toggleBtn.textContent = '◀';  // Arrow pointing left (to expand)
+                toggleBtn.title = 'Show 3D structure panel';
+                rightPanelBtn?.classList.remove('active');
             }
+
+            // Re-render chart after animation to fill available space
+            setTimeout(() => {
+                window.dispatchEvent(new Event('resize'));
+            }, 350);
         }
 
         // Re-apply colors when mouse enters structure panel (colors may have been cleared)
@@ -4623,6 +5257,17 @@
             isLoadingStructure = true;
             currentStructureGene = gene.toUpperCase();
             updateStatus(`Loading structure for ${currentStructureGene}...`);
+
+            // Clear any existing track overlays when loading new structure
+            if (plugin && trackOverlayState.overlayedTracks.length > 0) {
+                try {
+                    await clearAllTrackOverlays();
+                } catch (e) {
+                    console.warn('[OVERLAY] Error clearing overlays:', e);
+                }
+                trackOverlayState.overlayedTracks = [];
+                trackOverlayState.sphereRefs.clear();
+            }
 
             try {
                 // Fetch structure metadata from API
@@ -6688,6 +7333,12 @@
 
                             // 3. Update track panel crosshair/highlight
                             moveCrosshairToResidue(residueNum);
+                        } else {
+                            // Clicked on empty space - remove the yellow sphere highlight
+                            console.log('[HALO] clicked on empty space, removing highlight');
+                            await removeHalo();
+                            selectedResidue = null;
+                            lastClickedLoci = null;
                         }
                     });
                 } else {

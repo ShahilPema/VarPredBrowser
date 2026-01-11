@@ -31,6 +31,42 @@ SCORE_COLUMNS = {
 STACKED_PRED_COLUMNS = ['Constraint', 'Core', 'Complete']
 
 
+def get_oe_columns() -> dict:
+    """Generate O/E column names for percentile calculation."""
+    windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]
+    consequences = ["mis", "syn", "any"]
+    af_suffix = "af0epos00"  # Only AF≥0 for O/E
+
+    columns = {}
+    for window in windows:
+        for cons in consequences:
+            col = f"rgc_{cons}_exomes_XX_XY_{window}_oe_{af_suffix}"
+            columns[col] = col  # Use same name for output
+    return columns
+
+
+def get_vir_columns() -> dict:
+    """Generate VIR column names for percentile calculation (no depth)."""
+    consequences = ["mis", "syn", "any"]
+    af_suffixes = ["af0epos00", "af1eneg04", "af1eneg06"]
+    # Length, Expected μ, Mean Expected - NOT depth
+    metrics = ["vir_length", "vir_mu_exp", "mean_vir_exp"]
+
+    columns = {}
+    for metric in metrics:
+        for cons in consequences:
+            for af in af_suffixes:
+                col = f"rgc_{cons}_exomes_XX_XY_{metric}_{af}"
+                columns[col] = col
+
+    # AA Level (missense only) - only length, not depth
+    for af in af_suffixes:
+        col = f"rgc_mis_exomes_XX_XY_aa_vir_length_{af}"
+        columns[col] = col
+
+    return columns
+
+
 def calculate_exome_percentile(df: pl.DataFrame, col: str, output_name: str) -> pl.DataFrame:
     """
     Calculate exome-wide percentile for a column using average rank method.
@@ -75,7 +111,28 @@ def main(input_path: str, output_path: str):
     # --- EXOME-WIDE PERCENTILES ---
     print("\n=== Calculating Exome-Wide Percentiles ===")
 
+    print("\n--- dbNSFP Scores ---")
     for col, name in SCORE_COLUMNS.items():
+        if col in df.columns:
+            print(f"  {col} -> {name}_exome_perc")
+            df = calculate_exome_percentile(df, col, name)
+        else:
+            print(f"  {col} - NOT FOUND, skipping")
+
+    # --- O/E PERCENTILES ---
+    print("\n--- O/E Ratios ---")
+    oe_columns = get_oe_columns()
+    for col, name in oe_columns.items():
+        if col in df.columns:
+            print(f"  {col} -> {name}_exome_perc")
+            df = calculate_exome_percentile(df, col, name)
+        else:
+            print(f"  {col} - NOT FOUND, skipping")
+
+    # --- VIR PERCENTILES (no depth) ---
+    print("\n--- VIRs (no depth percentiles) ---")
+    vir_columns = get_vir_columns()
+    for col, name in vir_columns.items():
         if col in df.columns:
             print(f"  {col} -> {name}_exome_perc")
             df = calculate_exome_percentile(df, col, name)

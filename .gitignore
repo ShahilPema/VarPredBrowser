@@ -53,5 +53,14 @@ env/
 .DS_Store
 Thumbs.db
 
+# Node modules
+node_modules/
+
+# Data directory (large files)
+data/
+
+# Screenshots
+Screenshot*.png
+
 # Local config (users should copy paths.yaml.example)
 # config/paths.yaml  # Uncomment if you want users to create their own

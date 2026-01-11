@@ -8,138 +8,105 @@ from typing import Dict, Any, List
 
 
 def build_oe_tree() -> Dict[str, Any]:
-    """Build the O/E Ratios tree section."""
+    """Build the O/E Ratios tree section - flattened by window size with Raw/%ile separation."""
+    # Window sizes in ascending order
+    windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]
+    consequences = [("mis", "Missense"), ("syn", "Synonymous"), ("any", "Any")]
+    af_suffix = "af0epos00"  # Only AF≥0
 
-    def window_node(consequence: str, window: str, with_af: bool = False) -> Dict[str, Any]:
-        if with_af:
-            afs = [
-                ("(0)", "af0epos00"),
-                ("(10⁻⁶)", "af1eneg06"),
-                ("(10⁻⁴)", "af1eneg04"),
-            ]
-        else:
-            afs = [("(0)", "af0epos00")]
+    def build_window_section(window: str) -> Dict[str, Any]:
+        raw_children = []
+        perc_children = []
+        for cons, cons_label in consequences:
+            raw_children.append({
+                "label": cons_label,
+                "fieldId": f"rgc_{cons}_exomes_XX_XY_{window}_oe_{af_suffix}",
+            })
+            perc_children.append({
+                "label": cons_label,
+                "fieldId": f"rgc_{cons}_exomes_XX_XY_{window}_oe_{af_suffix}_exome_perc",
+            })
         return {
-            "label": window,
+            "label": f"{window} O/E",
             "children": [
-                {
-                    "label": "O/E",
-                    "children": [
-                        {
-                            "label": lab,
-                            "fieldId": f"rgc_{consequence}_exomes_XX_XY_{window}_oe_{suffix}",
-                            "percentileFieldId": f"dbnsfp.max_rgc_{consequence}_exomes_XX_XY_{window}_oe_{suffix}_exome_perc"
-                        }
-                        for lab, suffix in afs
-                    ],
-                },
-                {
-                    "label": "Expected",
-                    "children": [
-                        {
-                            "label": lab,
-                            "fieldId": f"rgc_{consequence}_exomes_XX_XY_{window}_e_{suffix}",
-                            "percentileFieldId": f"dbnsfp.max_rgc_{consequence}_exomes_XX_XY_{window}_e_{suffix}_exome_perc"
-                        }
-                        for lab, suffix in afs
-                    ],
-                },
-            ],
+                {"label": "Raw", "children": raw_children},
+                {"label": "Exome-Wide %ile", "children": perc_children},
+            ]
         }
-
-    miss_windows = [
-        window_node("mis", "3bp", False),
-        window_node("mis", "9bp", False),
-        window_node("mis", "21bp", True),
-        window_node("mis", "45bp", True),
-        window_node("mis", "93bp", True),
-    ]
-    syn_windows = [window_node("syn", bp, False) for bp in ["3bp", "9bp", "21bp", "45bp", "93bp"]]
-    any_windows = [window_node("any", bp, False) for bp in ["3bp", "9bp", "21bp", "45bp", "93bp"]]
 
     return {
         "label": "O/E Ratios",
-        "children": [
-            {"label": "Missense", "children": miss_windows},
-            {"label": "Synonymous", "children": syn_windows},
-            {"label": "Any", "children": any_windows},
-        ],
+        "children": [build_window_section(w) for w in windows],
     }
 
 
 def build_vir_tree() -> Dict[str, Any]:
-    """Build the VIRs tree section."""
+    """Build the VIRs tree section - flattened by metric type with Raw/%ile separation."""
+    # AF levels with ≥ notation
     af_levels = [
-        ("(0)", "af0epos00"),
-        ("(10⁻⁶)", "af1eneg06"),
-        ("(10⁻⁵)", "af1eneg05"),
-        ("(10⁻⁴)", "af1eneg04"),
-        ("(10⁻³)", "af1eneg03"),
-        ("(10⁻²)", "af1eneg02"),
+        ("AF≥0", "af0epos00"),
+        ("AF≥10⁻⁴", "af1eneg04"),
+        ("AF≥10⁻⁶", "af1eneg06"),
+    ]
+    consequences = [("mis", "Missense"), ("syn", "Synonymous"), ("any", "Any")]
+    # Metrics: (label, suffix, has_percentile)
+    metrics = [
+        ("Length", "vir_length", True),
+        ("Depth", "vir_depth", False),  # No percentiles for depth
+        ("Expected μ", "vir_mu_exp", True),
+        ("Mean Expected", "mean_vir_exp", True),
     ]
 
-    def vir_group(consequence: str) -> Dict[str, Any]:
-        return {
-            "label": consequence.capitalize() if consequence != "any" else "Any",
-            "children": [
-                {
-                    "label": lab,
-                    "children": [
-                        {
-                            "label": "Length",
-                            "fieldId": f"rgc_{consequence}_exomes_XX_XY_vir_length_{suffix}",
-                            "percentileFieldId": f"dbnsfp.max_rgc_{consequence}_exomes_XX_XY_vir_length_{suffix}_exome_perc"
-                        },
-                        {
-                            "label": "Depth",
-                            "fieldId": f"rgc_{consequence}_exomes_XX_XY_vir_depth_{suffix}",
-                            "percentileFieldId": f"dbnsfp.max_rgc_{consequence}_exomes_XX_XY_vir_depth_{suffix}_exome_perc"
-                        },
-                        {
-                            "label": "Expected μ",
-                            "fieldId": f"rgc_{consequence}_exomes_XX_XY_vir_mu_exp_{suffix}",
-                            "percentileFieldId": f"dbnsfp.max_rgc_{consequence}_exomes_XX_XY_vir_mu_exp_{suffix}_exome_perc"
-                        },
-                        {
-                            "label": "Mean Expected",
-                            "fieldId": f"rgc_{consequence}_exomes_XX_XY_mean_vir_exp_{suffix}",
-                            "percentileFieldId": f"dbnsfp.max_rgc_{consequence}_exomes_XX_XY_mean_vir_exp_{suffix}_exome_perc"
-                        },
-                    ],
-                }
-                for lab, suffix in af_levels
-            ],
-        }
+    def build_metric_section(metric_label: str, metric_suffix: str, has_percentile: bool) -> Dict[str, Any]:
+        raw_children = []
+        perc_children = []
+        for cons, cons_label in consequences:
+            for af_label, af_suffix in af_levels:
+                raw_children.append({
+                    "label": f"{cons_label} {af_label}",
+                    "fieldId": f"rgc_{cons}_exomes_XX_XY_{metric_suffix}_{af_suffix}",
+                })
+                if has_percentile:
+                    perc_children.append({
+                        "label": f"{cons_label} {af_label}",
+                        "fieldId": f"rgc_{cons}_exomes_XX_XY_{metric_suffix}_{af_suffix}_exome_perc",
+                    })
+        children = [{"label": "Raw", "children": raw_children}]
+        if has_percentile:
+            children.append({"label": "Exome-Wide %ile", "children": perc_children})
+        return {"label": metric_label, "children": children}
 
-    aa_children = [
-        {
-            "label": lab,
-            "children": [
-                {
-                    "label": "Depth",
-                    "fieldId": f"rgc_mis_exomes_XX_XY_aa_vir_depth_{suffix}",
-                    "percentileFieldId": f"dbnsfp.max_rgc_mis_exomes_XX_XY_aa_vir_depth_{suffix}_exome_perc"
-                },
-                {
-                    "label": "Length",
-                    "fieldId": f"rgc_mis_exomes_XX_XY_aa_vir_length_{suffix}",
-                    "percentileFieldId": f"dbnsfp.max_rgc_mis_exomes_XX_XY_aa_vir_length_{suffix}_exome_perc"
-                },
-            ],
-        }
-        for lab, suffix in af_levels
-    ]
+    # Build AA Level section (missense only) - depth has no percentiles, length does
+    aa_raw_depth = []
+    aa_raw_length = []
+    aa_perc_length = []
+    for af_label, af_suffix in af_levels:
+        aa_raw_depth.append({
+            "label": f"Depth {af_label}",
+            "fieldId": f"rgc_mis_exomes_XX_XY_aa_vir_depth_{af_suffix}",
+        })
+        aa_raw_length.append({
+            "label": f"Length {af_label}",
+            "fieldId": f"rgc_mis_exomes_XX_XY_aa_vir_length_{af_suffix}",
+        })
+        aa_perc_length.append({
+            "label": f"Length {af_label}",
+            "fieldId": f"rgc_mis_exomes_XX_XY_aa_vir_length_{af_suffix}_exome_perc",
+        })
 
-    miss = vir_group("mis")
-    miss["children"] = miss["children"] + [{"label": "AA Level", "children": aa_children}]
+    aa_section = {
+        "label": "AA Level (Missense)",
+        "children": [
+            {"label": "Raw", "children": aa_raw_depth + aa_raw_length},
+            {"label": "Exome-Wide %ile", "children": aa_perc_length},
+        ]
+    }
 
     return {
         "label": "VIRs",
         "children": [
-            miss,
-            vir_group("syn"),
-            vir_group("any"),
-        ],
+            build_metric_section(label, suffix, has_perc) for label, suffix, has_perc in metrics
+        ] + [aa_section],
     }
 
 
@@ -161,7 +128,7 @@ def build_gnomad_oe_tree() -> Dict[str, Any]:
             ],
         }
 
-    windows = ["21bp", "45bp", "93bp", "9bp", "3bp"]  # Most used first
+    windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]  # Ascending order
     consequences = [("mis", "Missense"), ("syn", "Synonymous"), ("any", "Any")]
 
     return {
@@ -177,46 +144,41 @@ def build_gnomad_oe_tree() -> Dict[str, Any]:
 
 
 def build_coverage_tree() -> Dict[str, Any]:
-    """Build the Coverage track tree section (browser-data-refactor.md Task 2)."""
-    # 12 total coverage columns: 6 thresholds x 2 cohorts
-    thresholds = [10, 15, 20, 25, 30, 50]
+    """Build the Coverage track tree section (browser-data-refactor.md Section 2)."""
     return {
         "label": "Coverage",
         "children": [
             {
                 "label": "Exomes",
                 "children": [
-                    {"label": f">{t}x", "fieldId": f"gnomad_exomes_over_{t}"}
-                    for t in thresholds
+                    {"label": "Mean", "fieldId": "gnomad_exomes_mean"},
+                    {"label": "Median", "fieldId": "gnomad_exomes_median"},
+                    {"label": "Over 20x", "fieldId": "gnomad_exomes_over_20"},
+                    {"label": "Over 30x", "fieldId": "gnomad_exomes_over_30"},
                 ],
             },
             {
                 "label": "Genomes",
                 "children": [
-                    {"label": f">{t}x", "fieldId": f"gnomad_genomes_over_{t}"}
-                    for t in thresholds
+                    {"label": "Mean", "fieldId": "gnomad_genomes_mean"},
+                    {"label": "Median", "fieldId": "gnomad_genomes_median"},
+                    {"label": "Over 20x", "fieldId": "gnomad_genomes_over_20"},
+                    {"label": "Over 30x", "fieldId": "gnomad_genomes_over_30"},
                 ],
             },
         ],
     }
 
 
-def build_comparable_percentiles_tree() -> Dict[str, Any]:
-    """Build the Comparable Percentiles track section (browser-data-refactor.md Task 10).
-
-    These percentiles are calculated across positions where ALL 6 scores are defined,
-    enabling direct cross-track comparison.
-    """
+def build_variant_frequency_tree() -> Dict[str, Any]:
+    """Build the Variant Frequencies track tree section."""
     return {
-        "label": "Comparable %iles",
+        "label": "Variant Frequencies",
         "children": [
-            {"label": "AlphaMissense", "fieldId": "AlphaMissense_am_pathogenicity_cross_norm_perc"},
-            {"label": "ESM1b", "fieldId": "ESM1b_score_cross_norm_perc"},
-            {"label": "MTR", "fieldId": "RGC_MTR_MTR_cross_norm_perc"},
-            {"label": "Constraint", "fieldId": "Constraint_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc"},
-            {"label": "Core", "fieldId": "Core_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc"},
-            {"label": "Complete", "fieldId": "Complete_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc"},
-        ]
+            {"label": "gnomAD Exomes", "fieldId": "gnomad_exomes_variants", "type": "variant_frequency"},
+            {"label": "gnomAD Genomes", "fieldId": "gnomad_genomes_variants", "type": "variant_frequency"},
+            {"label": "RGC", "fieldId": "rgc_variants", "type": "variant_frequency"},
+        ],
     }
 
 
@@ -270,8 +232,7 @@ def build_track_tree() -> Dict[str, Any]:
             {
                 "label": "ClinVar",
                 "children": [
-                    {"label": "Labels (Stacked)", "fieldId": "clinvar.clinvar_label_list", "type": "clinvar_stacked"},
-                    {"label": "Variant Count", "fieldId": "clinvar.clinvar_count"},
+                    {"label": "Variants", "fieldId": "clinvar_variants", "type": "clinvar_variants"},
                 ],
             },
             # 4) Training Labels
@@ -309,7 +270,6 @@ def build_track_tree() -> Dict[str, Any]:
                         "children": [
                             {"label": "phyloP 447-way", "fieldId": "phylop_scores_447way"},
                             {"label": "phyloP 100-way", "fieldId": "phylop_scores_100way"},
-                            {"label": "phyloP 17-way", "fieldId": "phylop17way"},
                         ],
                     },
                     {
@@ -355,7 +315,6 @@ def build_track_tree() -> Dict[str, Any]:
         "label": "gnomAD",
         "children": [
             build_gnomad_oe_tree(),
-            build_coverage_tree(),
         ],
     }
     # Insert gnomAD after RGC
@@ -364,11 +323,16 @@ def build_track_tree() -> Dict[str, Any]:
             track_tree["children"].insert(i + 1, gnomad_section)
             break
 
-    # Add Comparable Percentiles section (Task 10 of browser-data-refactor.md)
-    # Insert after Comparators section
+    # Add Coverage as top-level section after gnomAD
     for i, child in enumerate(track_tree["children"]):
-        if child["label"] == "Comparators":
-            track_tree["children"].insert(i + 1, build_comparable_percentiles_tree())
+        if child["label"] == "gnomAD":
+            track_tree["children"].insert(i + 1, build_coverage_tree())
+            break
+
+    # Add Variant Frequencies section after Coverage
+    for i, child in enumerate(track_tree["children"]):
+        if child["label"] == "Coverage":
+            track_tree["children"].insert(i + 1, build_variant_frequency_tree())
             break
 
     return track_tree
@@ -383,7 +347,6 @@ def simplify_track_name(track_name: str) -> str:
         'AlphaMissense_am_pathogenicity': 'AlphaMissense',
         'phylop_scores_447way': 'phyloP 447way',
         'phylop_scores_100way': 'phyloP 100way',
-        'phylop17way': 'phyloP 17way',
         'ESM1b_score': 'ESM1b',
         'domain_name': 'Domains',
         'domain_id_interpro': 'Domain IDs',
@@ -391,10 +354,15 @@ def simplify_track_name(track_name: str) -> str:
         'source_db': 'Domain Sources',
         'domains': 'Protein Domains',
         # ClinVar columns
+        'clinvar_variants': 'ClinVar Variants',
         'clinvar.clinvar_count': 'ClinVar Count',
         'clinvar.clinvar_label_list': 'ClinVar Labels',
         'clinvar.clinvar_status_list': 'ClinVar Status',
         'clinvar.clinvar_var_type_list': 'ClinVar Var Types',
+        # Variant frequency tracks
+        'rgc_variants': 'RGC Variants',
+        'gnomad_exomes_variants': 'gnomAD Exome Variants',
+        'gnomad_genomes_variants': 'gnomAD Genome Variants',
         # Training columns
         'training.train_counts.labelled': 'Labelled',
         'training.train_counts.unlabelled': 'Unlabelled',
@@ -413,32 +381,15 @@ def simplify_track_name(track_name: str) -> str:
         # Stacked tracks
         'AlphaMissense_stacked': 'AlphaMissense (stacked)',
         'ESM1b_stacked': 'ESM1b (stacked)',
-        # gnomAD coverage (all 12 thresholds)
-        'gnomad_exomes_over_10': 'Exome >10x',
-        'gnomad_exomes_over_15': 'Exome >15x',
+        # gnomAD coverage
+        'gnomad_exomes_mean': 'Exome Mean Cov',
+        'gnomad_exomes_median': 'Exome Median Cov',
         'gnomad_exomes_over_20': 'Exome >20x',
-        'gnomad_exomes_over_25': 'Exome >25x',
         'gnomad_exomes_over_30': 'Exome >30x',
-        'gnomad_exomes_over_50': 'Exome >50x',
-        'gnomad_genomes_over_10': 'Genome >10x',
-        'gnomad_genomes_over_15': 'Genome >15x',
+        'gnomad_genomes_mean': 'Genome Mean Cov',
+        'gnomad_genomes_median': 'Genome Median Cov',
         'gnomad_genomes_over_20': 'Genome >20x',
-        'gnomad_genomes_over_25': 'Genome >25x',
         'gnomad_genomes_over_30': 'Genome >30x',
-        'gnomad_genomes_over_50': 'Genome >50x',
-        # Cross-normalized percentiles
-        'AlphaMissense_am_pathogenicity_cross_norm_perc': 'AlphaMissense (comp %ile)',
-        'ESM1b_score_cross_norm_perc': 'ESM1b (comp %ile)',
-        'RGC_MTR_MTR_cross_norm_perc': 'MTR (comp %ile)',
-        'Constraint_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc': 'Constraint (comp %ile)',
-        'Core_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc': 'Core (comp %ile)',
-        'Complete_200_otu_No_RGC_aapos_AON4_pred_cross_norm_perc': 'Complete (comp %ile)',
-        # ClinVar variants (new format)
-        'clinvar_variants': 'ClinVar Variants',
-        # Variant frequencies
-        'rgc_variants': 'RGC Frequencies',
-        'gnomad_exomes_variants': 'gnomAD Exome Frequencies',
-        'gnomad_genomes_variants': 'gnomAD Genome Frequencies',
     }
     if track_name in name_mappings:
         return name_mappings[track_name]
@@ -481,8 +432,12 @@ def categorize_track(track_name: str) -> str:
     name_lower = track_name.lower()
 
     # ClinVar annotations
-    if track_name.startswith('clinvar.'):
+    if track_name.startswith('clinvar.') or track_name == 'clinvar_variants':
         return 'ClinVar'
+
+    # Variant frequency tracks
+    elif track_name in ('rgc_variants', 'gnomad_exomes_variants', 'gnomad_genomes_variants'):
+        return 'Variant Frequencies'
 
     # Training labels
     elif track_name.startswith('training.'):
@@ -605,3 +560,9 @@ CONSTRAINT_STACKED_FIELDS = {'Constraint', 'Core', 'Complete'}
 
 # Set of dbNSFP stacked track fields that store variant arrays (allele, score, percentile)
 DBNSFP_STACKED_FIELDS = {'AlphaMissense_stacked', 'ESM1b_stacked'}
+
+# Set of variant frequency track fields
+VARIANT_FREQUENCY_FIELDS = {'rgc_variants', 'gnomad_exomes_variants', 'gnomad_genomes_variants'}
+
+# ClinVar variants field (new struct format)
+CLINVAR_VARIANTS_FIELD = 'clinvar_variants'
