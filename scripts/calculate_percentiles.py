@@ -53,16 +53,16 @@ def extract_max_pred(df: pl.DataFrame, col: str) -> pl.DataFrame:
     """
     Extract max prediction value from stacked array column.
 
-    Array format: [{_0: alt, _1: pred, _2: n_pred}, ...]
+    Array format: [{alt: str, pred: float, n_pred: int}, ...]
     """
     # Check if column exists and has data
     if col not in df.columns:
         return df.with_columns(pl.lit(None).cast(pl.Float64).alias(f'{col}_max_pred'))
 
     # Extract max pred value from array of structs
-    # Struct fields are _0 (alt), _1 (pred), _2 (n_pred) after Spark export
+    # Struct fields are named: alt, pred, n_pred (from hl.struct() in Hail)
     return df.with_columns(
-        pl.col(col).list.eval(pl.element().struct.field('_1')).list.max()
+        pl.col(col).list.eval(pl.element().struct.field('pred')).list.max()
         .alias(f'{col}_max_pred')
     )
 
