@@ -110,35 +110,96 @@ def build_vir_tree() -> Dict[str, Any]:
     }
 
 
-def build_gnomad_oe_tree() -> Dict[str, Any]:
-    """Build the gnomAD O/E Ratios tree section (Section 6 of browser-data-refactor.md)."""
-
-    def window_node(consequence: str, window: str) -> Dict[str, Any]:
-        return {
-            "label": window,
-            "children": [
-                {
-                    "label": "O/E",
-                    "fieldId": f"gnomad_{consequence}_{window}_oe",
-                },
-                {
-                    "label": "Expected",
-                    "fieldId": f"gnomad_{consequence}_{window}_e",
-                },
-            ],
-        }
-
-    windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]  # Ascending order
+def build_gnomad_vir_tree() -> Dict[str, Any]:
+    """Build the gnomAD VIRs tree section (combined XX_XY data)."""
+    # AF levels with ≥ notation
+    af_levels = [
+        ("AF≥0", "af0epos00"),
+        ("AF≥10⁻⁴", "af1eneg04"),
+        ("AF≥10⁻⁶", "af1eneg06"),
+    ]
     consequences = [("mis", "Missense"), ("syn", "Synonymous"), ("any", "Any")]
+    # Metrics: (label, suffix)
+    metrics = [
+        ("Length", "vir_length"),
+        ("Depth", "vir_depth"),
+        ("Expected μ", "vir_mu_exp"),
+        ("Mean Expected", "mean_vir_exp"),
+    ]
+
+    def build_metric_section(metric_label: str, metric_suffix: str) -> Dict[str, Any]:
+        children = []
+        for cons, cons_label in consequences:
+            for af_label, af_suffix in af_levels:
+                # gnomAD VIR columns use format: gnomad_{cons}_XX_XY_{metric}_{af}
+                children.append({
+                    "label": f"{cons_label} {af_label}",
+                    "fieldId": f"gnomad_{cons}_XX_XY_{metric_suffix}_{af_suffix}",
+                })
+        return {"label": metric_label, "children": children}
 
     return {
-        "label": "O/E Ratios",
+        "label": "VIRs",
+        "children": [
+            build_metric_section(label, suffix) for label, suffix in metrics
+        ],
+    }
+
+
+def build_gnomad_cohort_tree(cohort: str, cohort_label: str) -> Dict[str, Any]:
+    """Build gnomAD tree for a specific cohort (exomes or genomes), mirroring RGC structure."""
+    windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]
+    consequences = [("mis", "Missense"), ("syn", "Synonymous"), ("any", "Any")]
+
+    def build_window_section(window: str) -> Dict[str, Any]:
+        """Build O/E section for a specific window size."""
+        children = []
+        for cons, cons_label in consequences:
+            children.append({
+                "label": cons_label,
+                "fieldId": f"gnomad_{cons}_{cohort}_{window}_oe",
+            })
+        return {
+            "label": f"{window} O/E",
+            "children": children,
+        }
+
+    return {
+        "label": cohort_label,
         "children": [
             {
+                "label": "O/E Ratios",
+                "children": [build_window_section(w) for w in windows],
+            },
+        ],
+    }
+
+
+def build_gnomad_combined_tree() -> Dict[str, Any]:
+    """Build gnomAD combined (exomes + genomes) tree with weighted O/E ratios."""
+    windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]
+    consequences = [("mis", "Missense"), ("syn", "Synonymous"), ("stop_gained", "Stop Gained")]
+
+    def build_window_section(window: str) -> Dict[str, Any]:
+        """Build O/E section for a specific window size."""
+        children = []
+        for cons, cons_label in consequences:
+            children.append({
                 "label": cons_label,
-                "children": [window_node(cons, w) for w in windows],
-            }
-            for cons, cons_label in consequences
+                "fieldId": f"gnomad_{cons}_combined_{window}_oe_weighted",
+            })
+        return {
+            "label": f"{window} O/E",
+            "children": children,
+        }
+
+    return {
+        "label": "gnomAD v4 Combined",
+        "children": [
+            {
+                "label": "O/E Ratios (Weighted)",
+                "children": [build_window_section(w) for w in windows],
+            },
         ],
     }
 
@@ -315,22 +376,26 @@ def build_track_tree() -> Dict[str, Any]:
             child["children"].append(build_vir_tree())
             break
 
-    # Add gnomAD section (Section 6 of browser-data-refactor.md)
-    gnomad_section = {
-        "label": "gnomAD",
-        "children": [
-            build_gnomad_oe_tree(),
-        ],
-    }
-    # Insert gnomAD after RGC
+    # Add gnomAD v4 sections - separate trees for Exomes, Genomes, and Combined
+    gnomad_exomes = build_gnomad_cohort_tree("exomes", "gnomAD v4 Exomes")
+    gnomad_genomes = build_gnomad_cohort_tree("genomes", "gnomAD v4 Genomes")
+    gnomad_combined = build_gnomad_combined_tree()
+
+    # Add shared VIRs to exomes and genomes (VIR data uses combined XX_XY, not split by cohort)
+    gnomad_exomes["children"].append(build_gnomad_vir_tree())
+    gnomad_genomes["children"].append(build_gnomad_vir_tree())
+
+    # Insert gnomAD sections after RGC (in order: Exomes, Genomes, Combined)
     for i, child in enumerate(track_tree["children"]):
         if child["label"] == "RGC":
-            track_tree["children"].insert(i + 1, gnomad_section)
+            track_tree["children"].insert(i + 1, gnomad_combined)
+            track_tree["children"].insert(i + 1, gnomad_genomes)
+            track_tree["children"].insert(i + 1, gnomad_exomes)
             break
 
-    # Add Coverage as top-level section after gnomAD
+    # Add Coverage as top-level section after gnomAD Combined
     for i, child in enumerate(track_tree["children"]):
-        if child["label"] == "gnomAD":
+        if child["label"] == "gnomAD v4 Combined":
             track_tree["children"].insert(i + 1, build_coverage_tree())
             break
 

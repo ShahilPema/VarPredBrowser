@@ -2239,6 +2239,173 @@
             });
         }
 
+        /**
+         * Download a track visualization as PNG.
+         * Combines the track canvas with a rendered colorbar.
+         *
+         * @param {string} trackId - The track field ID
+         * @param {number} trackIndex - Index in selectedTracks array
+         * @param {string} legendType - Type of legend for this track
+         * @param {Function} colorScale - D3 color scale for this track
+         * @param {number} yMin - Minimum value for the scale
+         * @param {number} yMax - Maximum value for the scale
+         */
+        function downloadTrackAsPNG(trackId, trackIndex, legendType, colorScale, yMin, yMax) {
+            // Get the track canvas
+            const trackCanvas = document.querySelector(`canvas[data-track-id="${trackId}"]`);
+            if (!trackCanvas) {
+                console.error('[DOWNLOAD] Track canvas not found:', trackId);
+                return;
+            }
+
+            // Use 6x resolution for high-quality export
+            const scale = 6;
+
+            // Get actual canvas dimensions (CSS dimensions)
+            const trackWidth = parseInt(trackCanvas.style.width);
+            const trackHeight = parseInt(trackCanvas.style.height);
+            const colorbarSpace = 80;  // Space for colorbar + labels
+            const padding = 10;
+            const labelWidth = 120;  // Space for track name on left
+            const totalWidth = labelWidth + trackWidth + colorbarSpace + padding;
+            const totalHeight = trackHeight + padding * 2;
+
+            // Create combined canvas at 2x resolution with transparency
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = totalWidth * scale;
+            exportCanvas.height = totalHeight * scale;
+            const ctx = exportCanvas.getContext('2d', { alpha: true });
+
+            // Scale context (so we can use CSS pixel coordinates)
+            ctx.scale(scale, scale);
+
+            // Clear to transparent
+            ctx.clearRect(0, 0, totalWidth, totalHeight);
+
+            // Draw track name on left
+            ctx.save();
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillStyle = '#333';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(simplifyTrackName(trackId), labelWidth - 10, totalHeight / 2);
+            ctx.restore();
+
+            // Draw track canvas
+            ctx.drawImage(trackCanvas, labelWidth, padding, trackWidth, trackHeight);
+
+            // Render colorbar to the right
+            renderColorbarToCanvas(ctx, trackId, legendType, colorScale, yMin, yMax, labelWidth + trackWidth + 10, padding, trackHeight);
+
+            // Make the track background color transparent
+            // The track canvas uses #E4E0DD (228, 224, 221) as background
+            const imageData = ctx.getImageData(0, 0, exportCanvas.width, exportCanvas.height);
+            const data = imageData.data;
+            const bgR = 228, bgG = 224, bgB = 221;
+            const tolerance = 5;  // Allow slight variation
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i], g = data[i + 1], b = data[i + 2];
+                if (Math.abs(r - bgR) <= tolerance &&
+                    Math.abs(g - bgG) <= tolerance &&
+                    Math.abs(b - bgB) <= tolerance) {
+                    data[i + 3] = 0;  // Set alpha to 0 (transparent)
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            // Trigger download
+            const filename = `${simplifyTrackName(trackId).replace(/[^a-z0-9]/gi, '_')}.png`;
+            exportCanvas.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            }, 'image/png');
+        }
+
+        /**
+         * Render a track's colorbar to a canvas context.
+         *
+         * @param {CanvasRenderingContext2D} ctx - Canvas context
+         * @param {string} trackId - Track field ID
+         * @param {string} legendType - Type of legend
+         * @param {Function} colorScale - D3 color scale
+         * @param {number} yMin - Min value
+         * @param {number} yMax - Max value
+         * @param {number} x - X position
+         * @param {number} y - Y position
+         * @param {number} height - Available height
+         */
+        function renderColorbarToCanvas(ctx, trackId, legendType, colorScale, yMin, yMax, x, y, height) {
+            const colorbarHeight = Math.min(height - 10, 40);
+            const colorbarWidth = 15;
+            const labelX = x + colorbarWidth + 5;
+            const isFlipped = flippedTracks.has(trackId);
+
+            ctx.font = '10px sans-serif';
+            ctx.textBaseline = 'middle';
+
+            if (legendType === 'continuous' || legendType === 'constraint_stacked' || legendType === 'dbnsfp_stacked') {
+                // Gradient colorbar
+                const gradient = ctx.createLinearGradient(x, y + colorbarHeight, x, y);
+
+                // Sample the color scale to create gradient stops
+                for (let i = 0; i <= 10; i++) {
+                    const t = i / 10;
+                    const value = yMin + t * (yMax - yMin);
+                    const color = colorScale(isFlipped ? (yMax - value + yMin) : value);
+                    gradient.addColorStop(t, color);
+                }
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(x, y, colorbarWidth, colorbarHeight);
+                ctx.strokeStyle = '#666';
+                ctx.strokeRect(x, y, colorbarWidth, colorbarHeight);
+
+                // Add min/max labels
+                ctx.fillStyle = '#000';
+                ctx.textBaseline = 'top';
+                ctx.fillText(yMax.toFixed(1), labelX, y);
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(yMin.toFixed(1), labelX, y + colorbarHeight);
+
+            } else if (legendType === 'clinvar') {
+                // Categorical ClinVar colors
+                const categories = [
+                    { label: 'P', color: '#d62728' },
+                    { label: 'LP', color: '#ff7f0e' },
+                    { label: 'VUS', color: '#bcbd22' },
+                    { label: 'LB', color: '#2ca02c' },
+                    { label: 'B', color: '#1f77b4' }
+                ];
+                const boxSize = 8;
+                categories.forEach((cat, i) => {
+                    const cy = y + i * (boxSize + 2);
+                    ctx.fillStyle = cat.color;
+                    ctx.fillRect(x, cy, boxSize, boxSize);
+                    ctx.fillStyle = '#000';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(cat.label, x + boxSize + 3, cy + boxSize / 2);
+                });
+
+            } else if (legendType === 'domain') {
+                // Present/Absent
+                ctx.fillStyle = '#00b894';
+                ctx.fillRect(x, y, 10, 10);
+                ctx.fillStyle = '#000';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('Present', x + 15, y + 5);
+
+                ctx.fillStyle = '#555555';
+                ctx.fillRect(x, y + 15, 10, 10);
+                ctx.fillStyle = '#000';
+                ctx.fillText('Absent', x + 15, y + 20);
+            }
+        }
+
         function getClinVarColor(label) {
             // Try exact match first
             if (CLINVAR_COLORS[label]) return CLINVAR_COLORS[label];
@@ -2685,7 +2852,8 @@
                 this.canvas.style.height = height + 'px';
                 this.canvas.style.display = 'block';
                 this.canvas.style.backgroundColor = '#E4E0DD'; // Match chart background
-                
+                this.canvas.setAttribute('data-track-id', trackId);
+
                 this.ctx = this.canvas.getContext('2d', { alpha: false });
                 this.ctx.scale(dpr, dpr);
                 
@@ -3471,8 +3639,8 @@
                 }
 
                 // For raw O/E (now transformed), scale is -1 to 1
-                // Percentile values are 0-1, cross-norm percentiles are 0-100
-                const yMax = isCrossNormPerc ? 100 : (isPercTrack ? 1 : ((isDomain || isClinVarStacked) ? 1 : (isRawOE ? 1 : d3.max(values) || 1)));
+                // All percentile values are 0-100 (both exome-wide and cross-norm)
+                const yMax = isPercTrack ? 100 : ((isDomain || isClinVarStacked) ? 1 : (isRawOE ? 1 : d3.max(values) || 1));
                 const yMin = isRawOE ? -1 : 0;
                 const isFlipped = flippedTracks.has(trackId);
 
@@ -3984,6 +4152,49 @@
                             await addTrackOverlay(trackId);
                         }
                         renderChart();  // Re-render to update button state
+                    });
+                }
+
+                // Add download PNG button for all tracks with colorbars
+                {
+                    const hasFlipBtn = legendType === 'continuous' || legendType === 'constraint_stacked' || legendType === 'dbnsfp_stacked';
+                    const hasOverlayBtn = isEligibleForSphereOverlay(trackId) && window.molstarLoaded;
+
+                    // Position after other buttons
+                    let downloadBtnX = colorbarWidth + 35;  // Base position
+                    if (hasFlipBtn) downloadBtnX += 20;
+                    if (hasOverlayBtn) downloadBtnX += 20;
+
+                    const downloadBtn = colorbarG.append('g')
+                        .attr('class', 'download-btn')
+                        .attr('transform', `translate(${downloadBtnX}, ${colorbarHeight / 2})`)
+                        .style('cursor', 'pointer');
+
+                    downloadBtn.append('circle')
+                        .attr('r', 8)
+                        .attr('fill', '#444')
+                        .attr('stroke', '#666')
+                        .attr('stroke-width', 1);
+
+                    downloadBtn.append('text')
+                        .attr('text-anchor', 'middle')
+                        .attr('dominant-baseline', 'middle')
+                        .attr('font-size', '0.6rem')
+                        .attr('fill', '#fff')
+                        .attr('pointer-events', 'none')
+                        .text('⬇');
+
+                    downloadBtn.append('title').text(`Download ${simplifyTrackName(trackId)} as PNG`);
+
+                    // Capture values needed for download
+                    const capturedLegendType = legendType;
+                    const capturedColorScale = colorScale;
+                    const capturedYMin = yMin;
+                    const capturedYMax = yMax;
+
+                    downloadBtn.on('click', function(event) {
+                        event.stopPropagation();
+                        downloadTrackAsPNG(trackId, i, capturedLegendType, capturedColorScale, capturedYMin, capturedYMax);
                     });
                 }
               } catch (error) {
