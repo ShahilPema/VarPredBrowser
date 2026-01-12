@@ -3,16 +3,19 @@
 ## Goal
 Modify the frontend to use the new variant-level ClinVar data structure and add gnomAD-style filtering/display.
 
-## New Data Structure
+## Data Structure (IMPLEMENTED 2026-01-09)
+
 ```python
 'clinvar_variants': array<struct {
-    allele: str,                    # e.g., "A>G"
-    clinvar_variation_id: str,      # ClinVar ID for linking
-    clinical_significance: str,     # e.g., "Pathogenic", "Benign"
-    clinvar_status: str,            # Review status for star filtering
-    clinvar_mol_csq: str            # Molecular consequence for filtering
+    alt: str,            # Alternate allele (e.g., "G")
+    significance: str,   # Clinical significance (e.g., "Pathogenic", "Benign")
+    status: str,         # Review status
+    mol_csq: str,        # Molecular consequence for filtering
+    variation_id: str    # ClinVar variation ID for linking
 }>
 ```
+
+**Note:** `clinvar_count` and old list-based columns removed.
 
 ## Current Frontend State
 - File: `browser/frontend/index.html`
@@ -105,10 +108,11 @@ Show count of visible variants after filtering:
 
 ### Step 7: Update Tooltip
 Show variant details on hover:
-- Allele change (e.g., "A>G")
-- Clinical significance
-- Molecular consequence
-- **Clickable ClinVar link**: `https://www.ncbi.nlm.nih.gov/clinvar/variation/{clinvar_variation_id}/`
+- Alternate allele (from `alt` field)
+- Clinical significance (from `significance` field)
+- Review status (from `status` field)
+- Molecular consequence (from `mol_csq` field)
+- **Clickable ClinVar link**: `https://www.ncbi.nlm.nih.gov/clinvar/variation/{variation_id}/`
 
 ---
 
@@ -131,15 +135,22 @@ let clinvarConsequenceFilter = { plof: true, missense: true, synonymous: true, o
 
 ## Summary of Changes
 
-1. **Backend** (`track_tree.py`): Change fieldId from `clinvar.clinvar_label_list` to `clinvar_variants`
-2. **Frontend** (`index.html`):
+1. **Data Pipeline** (`browser_data.ipynb`): ✅ COMPLETE
+   - Restructured ClinVar from list-based to per-variant structs
+   - Fields: `alt`, `significance`, `status`, `mol_csq`, `variation_id`
+   - Removed `clinvar_count` (not needed)
+
+2. **Backend** (`track_tree.py`): PENDING
+   - Change fieldId from `clinvar.clinvar_label_list` to `clinvar_variants`
+
+3. **Frontend** (`index.html`): PENDING
    - Add helper functions: `getConsequenceCategory()`, `categorizeSignificance()`
    - Add filter state variables for significance and consequence
    - Update filter UI with significance + consequence checkboxes with "only" buttons
    - Rename `drawClinVarStacked()` → `drawClinVarVariants()` - draw individual variant markers (no binned mode)
    - **Use symbol shapes by consequence**: Cross (pLoF), Triangle (missense), Diamond (splice), Circle (other)
    - **Add variant count display**: "Showing X of Y ClinVar variants"
-   - Update tooltip with allele, significance, consequence, and **clickable ClinVar link**
+   - Update tooltip with alt, significance, status, consequence
 
 ---
 
@@ -151,3 +162,15 @@ These gnomAD features require data we don't have in our structure:
 - MedGen condition links
 - gnomAD presence/frequency integration
 - Star filtering (user requested to skip)
+
+---
+
+## Change Log
+
+| Date | Change | Status |
+|------|--------|--------|
+| 2026-01-08 | Initial plan created | Pending |
+| 2026-01-09 | Data restructuring implemented in browser_data.ipynb | ✅ Complete |
+| 2026-01-09 | Field names: `alt`, `significance`, `status`, `mol_csq` | ✅ Complete |
+| 2026-01-09 | `clinvar_count` removed (not needed) | ✅ Complete |
+| - | Frontend implementation | Pending |

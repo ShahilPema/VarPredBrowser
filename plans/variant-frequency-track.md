@@ -8,6 +8,21 @@ Implement gnomAD-style variant frequency visualization tracks in the GeneBrowser
 
 ---
 
+## Data Structure (Implemented)
+
+The allele frequency data is stored as separate arrays per cohort:
+
+```python
+# Schema from browser_data.ipynb
+'rgc_variants': array<struct {alt: str, af: float64, ac: int32, an: int32, filters: set<str>}>
+'gnomad_exomes_variants': array<struct {alt: str, ac: int32, an: int32, af: float64, filters: set<str>}>
+'gnomad_genomes_variants': array<struct {alt: str, ac: int32, an: int32, af: float64, filters: set<str>}>
+```
+
+**Note:** gnomAD joint data is not available. Only 3 cohorts are supported.
+
+---
+
 ## Visual Encoding (gnomAD Style)
 
 Based on `@gnomad/track-variants` from gnomad-browser-toolkit:
@@ -17,7 +32,7 @@ Based on `@gnomad/track-variants` from gnomad-browser-toolkit:
 | X-position | Genomic position (via filtered index scale) |
 | Ellipse height (ry) | Log-scaled AF: `scaleLog().domain([0.00001, 0.01]).range([3, 14])` |
 | Ellipse width (rx) | Fixed, based on bar width |
-| Fill color | Cohort: blue=exomes, green=genomes, purple=joint, orange=RGC |
+| Fill color | Cohort: blue=exomes, green=genomes, orange=RGC |
 | Fill style | Solid = PASS, Hollow/dashed = Filtered |
 | Y-offset | Stacked for multiple variants at same position |
 
@@ -36,12 +51,11 @@ const AF_SCALE = d3.scaleLog()
     .range([3, 14])            // Ellipse height (ry) pixels
     .clamp(true);
 
-// Cohort colors
+// Cohort colors (3 cohorts - gnomAD joint not available)
 const COHORT_COLORS = {
-    gnomad_exomes: '#4285F4',   // Blue
-    gnomad_genomes: '#34A853',  // Green
-    gnomad_joint: '#9C27B0',    // Purple
-    rgc: '#FF6D00'              // Orange
+    gnomad_exomes_variants: '#4285F4',   // Blue
+    gnomad_genomes_variants: '#34A853',  // Green
+    rgc_variants: '#FF6D00'              // Orange
 };
 ```
 
@@ -100,7 +114,7 @@ drawVariantFrequency(positionsData, xScale, barWidth, cohort, showFiltered) {
 ```javascript
 drawVariantFrequencyOverlap(positionsData, xScale, barWidth, cohorts, showFiltered) {
     // Draw rarest cohorts first (for visibility)
-    const order = ['rgc', 'gnomad_exomes', 'gnomad_genomes', 'gnomad_joint'];
+    const order = ['rgc_variants', 'gnomad_exomes_variants', 'gnomad_genomes_variants'];
     const sortedCohorts = cohorts.sort((a, b) => order.indexOf(a) - order.indexOf(b));
 
     sortedCohorts.forEach(cohort => {
@@ -134,10 +148,10 @@ if (isVariantFrequencyTrack(trackId)) {
     if (cohort) {
         canvas.drawVariantFrequency(positionsData, xScaleZoomed, barWidth, cohort, showFilteredVariants);
     } else {
-        // Overlap mode
+        // Overlap mode (3 cohorts)
         canvas.drawVariantFrequencyOverlap(
             positionsData, xScaleZoomed, barWidth,
-            ['gnomad_exomes', 'gnomad_genomes', 'gnomad_joint', 'rgc'],
+            ['gnomad_exomes_variants', 'gnomad_genomes_variants', 'rgc_variants'],
             showFilteredVariants
         );
     }
@@ -169,9 +183,9 @@ function toggleFilteredVariants(show) {
 ```javascript
 function formatVariantFrequencyTooltip(d, trackId) {
     const cohort = getVariantFrequencyCohort(trackId) || 'all';
-    const variants = d.allele_frequencies || [];
+    // Each cohort has its own field with array of variant structs
     const cohorts = cohort === 'all'
-        ? ['gnomad_exomes', 'gnomad_genomes', 'gnomad_joint', 'rgc']
+        ? ['gnomad_exomes_variants', 'gnomad_genomes_variants', 'rgc_variants']
         : [cohort];
 
     let html = `
@@ -227,13 +241,14 @@ Add to TRACK_TREE:
 {
     "label": "Variant Frequencies",
     "children": [
-        {"label": "gnomAD Exomes", "fieldId": "af_gnomad_exomes", "type": "variant_frequency"},
-        {"label": "gnomAD Genomes", "fieldId": "af_gnomad_genomes", "type": "variant_frequency"},
-        {"label": "gnomAD Joint", "fieldId": "af_gnomad_joint", "type": "variant_frequency"},
-        {"label": "RGC", "fieldId": "af_rgc", "type": "variant_frequency"},
+        {"label": "gnomAD Exomes", "fieldId": "gnomad_exomes_variants", "type": "variant_frequency"},
+        {"label": "gnomAD Genomes", "fieldId": "gnomad_genomes_variants", "type": "variant_frequency"},
+        {"label": "RGC", "fieldId": "rgc_variants", "type": "variant_frequency"},
         {"label": "All Cohorts (Overlapped)", "fieldId": "af_all_overlap", "type": "variant_frequency_overlap"},
     ]
 }
+
+# Note: gnomAD joint frequency data is not available. Only exomes, genomes, and RGC cohorts are supported.
 ```
 
 ---
@@ -269,3 +284,6 @@ Add to TRACK_TREE:
 | Date | Change | Status |
 |------|--------|--------|
 | 2026-01-08 | Initial frontend implementation plan | Pending |
+| 2026-01-09 | Data fields implemented: `rgc_variants`, `gnomad_exomes_variants`, `gnomad_genomes_variants` | ✅ Complete |
+| 2026-01-09 | Removed gnomAD joint cohort (not available in data) | Updated |
+| - | Frontend implementation | Pending |

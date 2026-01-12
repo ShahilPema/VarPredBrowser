@@ -58,57 +58,112 @@ base_ht = base_ht.annotate(
 )
 ```
 
-### 2. Column Naming Convention
+### 2. Column Naming Convention - IMPLEMENTED
 
-Follow a parallel pattern to RGC columns:
+**Actual field naming pattern** (as of 2026-01-09):
 
+```
+gnomad_{consequence}_{cohort}_{sex}_{window}_oe
+```
+
+**Components:**
+- **consequence**: `mis`, `syn`, `stop_gained`
+- **cohort**: `exomes`, `genomes`, `combined`
+- **sex**: `XX`, `XY`, or omitted for combined sex
+- **window**: `3bp`, `9bp`, `21bp`, `45bp`, `93bp`
+
+**Examples from schema:**
+| Field Name | Type | Description |
+|------------|------|-------------|
+| `gnomad_mis_exomes_XX_21bp_oe` | float32 | Missense O/E, exomes, females, 21bp |
+| `gnomad_syn_genomes_XY_45bp_oe` | float32 | Synonymous O/E, genomes, males, 45bp |
+| `gnomad_stop_gained_exomes_3bp_oe` | float32 | Stop-gained O/E, exomes, combined sex, 3bp |
+| `gnomad_mis_combined_XX_9bp_oe_weighted` | float64 | Missense weighted O/E, exomes+genomes, females, 9bp |
+
+**Combined (weighted) fields:**
+```
+gnomad_{consequence}_combined_{sex}_{window}_oe_weighted
+```
+
+These represent sample-size-weighted averages of exome and genome O/E values.
+
+**Comparison with RGC:**
 | RGC Pattern | gnomAD Pattern |
 |-------------|----------------|
-| `rgc_mis_exomes_XX_XY_3bp_oe_af0epos00` | `gnomad_mis_3bp_oe` |
-| `rgc_mis_exomes_XX_XY_3bp_e_af0epos00` | `gnomad_mis_3bp_e` |
-| `rgc_syn_exomes_XX_XY_21bp_oe_af0epos00` | `gnomad_syn_21bp_oe` |
+| `rgc_mis_exomes_XX_XY_3bp_oe_af0epos00` | `gnomad_mis_exomes_3bp_oe` (combined sex) |
+| `rgc_mis_exomes_XX_XY_21bp_oe_af1eneg06` | `gnomad_mis_exomes_21bp_oe` (no AF filter) |
 
-**Simplified naming** for gnomAD (no exomes/XX_XY/af suffix needed if single cohort):
-- `gnomad_{consequence}_{window}_{metric}`
-- consequence: `mis`, `syn`, `any`, `lof`
-- window: `3bp`, `9bp`, `21bp`, `45bp`, `93bp`
-- metric: `oe`, `e`, `o`
+**Key differences from RGC:**
+- gnomAD has separate sex-stratified fields (`XX`, `XY`) in addition to combined
+- gnomAD has both exomes and genomes (RGC has exomes only)
+- gnomAD has weighted combined fields (`_combined_*_oe_weighted`)
+- gnomAD has no AF filter suffix (constraint computed differently)
 
 ---
 
 ## 3. Track Tree Updates (`browser/backend/track_tree.py`)
 
-### Option A: Add gnomAD as Sibling to RGC
+### Option A: Add gnomAD as Sibling to RGC (Recommended)
 
-Add a new top-level "gnomAD" section with parallel O/E structure:
+Add a new top-level "gnomAD" section with O/E structure reflecting actual field names:
 
 ```python
 def build_gnomad_oe_tree() -> Dict[str, Any]:
     """Build the gnomAD O/E Ratios tree section."""
 
-    def window_node(consequence: str, window: str) -> Dict[str, Any]:
-        return {
-            "label": window,
-            "children": [
-                {
-                    "label": "O/E",
-                    "fieldId": f"gnomad_{consequence}_{window}_oe",
-                },
-                {
-                    "label": "Expected",
-                    "fieldId": f"gnomad_{consequence}_{window}_e",
-                },
-            ],
-        }
+    def window_node(consequence: str, cohort: str, sex: str, window: str) -> Dict[str, Any]:
+        """Create node for a specific window."""
+        # Build field name: gnomad_{consequence}_{cohort}_{sex}_{window}_oe
+        if sex:
+            field_id = f"gnomad_{consequence}_{cohort}_{sex}_{window}_oe"
+        else:
+            field_id = f"gnomad_{consequence}_{cohort}_{window}_oe"
+        return {"label": window, "fieldId": field_id}
 
-    windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]
+    def cohort_node(consequence: str, cohort: str, sex_options: list) -> Dict[str, Any]:
+        """Create cohort node with sex/window hierarchy."""
+        windows = ["3bp", "9bp", "21bp", "45bp", "93bp"]
+        children = []
+        for sex, sex_label in sex_options:
+            sex_children = [window_node(consequence, cohort, sex, w) for w in windows]
+            children.append({"label": sex_label, "children": sex_children})
+        return {"label": cohort.capitalize(), "children": children}
+
+    # Sex options: (suffix, label)
+    sex_stratified = [("XX", "Female"), ("XY", "Male")]
+    combined_sex = [("", "All")]
+
+    consequences = [
+        ("mis", "Missense"),
+        ("syn", "Synonymous"),
+        ("stop_gained", "Stop Gained"),
+    ]
 
     return {
         "label": "O/E Ratios",
         "children": [
-            {"label": "Missense", "children": [window_node("mis", w) for w in windows]},
-            {"label": "Synonymous", "children": [window_node("syn", w) for w in windows]},
-            {"label": "Any", "children": [window_node("any", w) for w in windows]},
+            {
+                "label": csq_label,
+                "children": [
+                    cohort_node(csq, "exomes", sex_stratified + combined_sex),
+                    cohort_node(csq, "genomes", sex_stratified + combined_sex),
+                    # Combined weighted (exomes + genomes)
+                    {
+                        "label": "Combined (Weighted)",
+                        "children": [
+                            {
+                                "label": sex_label,
+                                "children": [
+                                    {"label": w, "fieldId": f"gnomad_{csq}_combined_{sex}_{w}_oe_weighted"}
+                                    for w in ["3bp", "9bp", "21bp", "45bp", "93bp"]
+                                ],
+                            }
+                            for sex, sex_label in [("XX", "Female"), ("XY", "Male"), ("", "All")]
+                        ],
+                    },
+                ],
+            }
+            for csq, csq_label in consequences
         ],
     }
 ```
@@ -189,22 +244,36 @@ The D3.js renderer will automatically handle new numeric tracks.
 
 ---
 
-## Expected New Columns
+## Actual Columns (Implemented)
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `gnomad_mis_3bp_oe` | Float64 | Missense O/E ratio, 3bp window |
-| `gnomad_mis_9bp_oe` | Float64 | Missense O/E ratio, 9bp window |
-| `gnomad_mis_21bp_oe` | Float64 | Missense O/E ratio, 21bp window |
-| `gnomad_mis_45bp_oe` | Float64 | Missense O/E ratio, 45bp window |
-| `gnomad_mis_93bp_oe` | Float64 | Missense O/E ratio, 93bp window |
-| `gnomad_syn_*_oe` | Float64 | Synonymous O/E ratios (5 windows) |
-| `gnomad_any_*_oe` | Float64 | Any consequence O/E ratios (5 windows) |
-| `gnomad_mis_*_e` | Float64 | Missense expected counts (5 windows) |
-| `gnomad_syn_*_e` | Float64 | Synonymous expected counts (5 windows) |
-| `gnomad_any_*_e` | Float64 | Any consequence expected counts (5 windows) |
+The gnomAD constraint columns are now in the schema. Here are the categories:
 
-**Total: ~30 new columns** (3 consequences x 5 windows x 2 metrics)
+### O/E by Cohort and Sex (~90 columns)
+
+**Pattern:** `gnomad_{consequence}_{cohort}_{sex}_{window}_oe` (float32)
+
+| Consequence | Cohorts | Sex Options | Windows | Count |
+|-------------|---------|-------------|---------|-------|
+| mis | exomes, genomes | XX, XY | 3bp, 9bp, 21bp, 45bp, 93bp | 20 |
+| syn | exomes, genomes | XX, XY | 3bp, 9bp, 21bp, 45bp, 93bp | 20 |
+| stop_gained | exomes, genomes | XX, XY | 3bp, 9bp, 21bp, 45bp, 93bp | 20 |
+
+**Also includes combined-sex fields** (no sex suffix):
+- `gnomad_mis_exomes_3bp_oe`, `gnomad_syn_genomes_21bp_oe`, etc.
+
+### Combined Weighted O/E (~45 columns)
+
+**Pattern:** `gnomad_{consequence}_combined_{sex}_{window}_oe_weighted` (float64)
+
+These combine exome and genome data with sample-size weighting.
+
+| Consequence | Sex Options | Windows | Count |
+|-------------|-------------|---------|-------|
+| mis | XX, XY, (all) | 3bp, 9bp, 21bp, 45bp, 93bp | 15 |
+| syn | XX, XY, (all) | 3bp, 9bp, 21bp, 45bp, 93bp | 15 |
+| stop_gained | XX, XY, (all) | 3bp, 9bp, 21bp, 45bp, 93bp | 15 |
+
+**Total: ~135 gnomAD O/E columns** (varies by exact sex stratification)
 
 ---
 
@@ -235,3 +304,7 @@ The D3.js renderer will automatically handle new numeric tracks.
 | Date | Change | Status |
 |------|--------|--------|
 | 2026-01-08 | Initial plan created | Pending |
+| 2026-01-09 | Data fields implemented in browser_data.ipynb | ✅ Complete |
+| 2026-01-09 | Updated plan with actual field naming convention | ✅ Complete |
+| - | Track tree integration | Pending |
+| - | Frontend testing | Pending |

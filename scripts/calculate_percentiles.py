@@ -25,8 +25,17 @@ SCORE_COLUMNS = {
     'max_RGC_MTR_MTR': 'RGC_MTR_MTR',
 }
 
-# Stacked array columns - we'll extract max prediction per locus
-STACKED_PRED_COLUMNS = ['Constraint', 'Core', 'Complete']
+# Stacked array columns - we'll extract max prediction per locus and add per-variant percentiles
+# Format: column_name -> (score_field, extra_fields_to_preserve)
+# score_field: the field containing the score to percentile ('pred' or 'score')
+# extra_fields: other fields to preserve when rebuilding the struct
+STACKED_PRED_COLUMNS = {
+    'Constraint': ('pred', ['n_pred']),
+    'Core': ('pred', ['n_pred']),
+    'Complete': ('pred', ['n_pred']),
+    'AlphaMissense_stacked': ('score', []),
+    'ESM1b_stacked': ('score', []),
+}
 
 
 def get_oe_columns() -> dict:
@@ -84,44 +93,60 @@ def build_percentile_exprs(df: pl.DataFrame, columns: dict[str, str]) -> list[pl
     return exprs
 
 
-def build_max_pred_exprs(df: pl.DataFrame, columns: list[str]) -> list[pl.Expr]:
+def build_max_pred_exprs(df: pl.DataFrame, columns: dict[str, tuple]) -> list[pl.Expr]:
     """
-    Build expressions to extract max prediction from stacked array columns.
+    Build expressions to extract max score from stacked array columns.
 
-    Array format: [{alt: str, pred: float, n_pred: int}, ...]
+    Args:
+        df: Input DataFrame
+        columns: Dict of column_name -> (score_field, extra_fields)
+
+    Array format: [{alt: str, <score_field>: float, ...}, ...]
     """
     exprs = []
-    for col in columns:
+    for col, (score_field, _) in columns.items():
         if col in df.columns:
             exprs.append(
-                pl.col(col).list.eval(pl.element().struct.field('pred')).list.max()
+                pl.col(col).list.eval(pl.element().struct.field(score_field)).list.max()
                 .alias(f'{col}_max_pred')
             )
     return exprs
 
 
-def add_per_variant_percentiles(df: pl.DataFrame, stacked_col: str) -> pl.DataFrame:
+def add_per_variant_percentiles(
+    df: pl.DataFrame,
+    stacked_col: str,
+    score_field: str,
+    extra_fields: list[str]
+) -> pl.DataFrame:
     """
     Add percentile field to each variant in a stacked array column.
 
-    Input format: [{alt: str, pred: float, n_pred: int}, ...]
-    Output format: [{alt: str, pred: float, n_pred: int, percentile: float}, ...]
+    Args:
+        df: Input DataFrame
+        stacked_col: Name of the stacked array column
+        score_field: Name of the score field to percentile ('pred' or 'score')
+        extra_fields: List of additional fields to preserve (e.g., ['n_pred'])
+
+    Input format: [{alt: str, <score_field>: float, ...}, ...]
+    Output format: [{alt: str, <score_field>: float, ..., percentile: float}, ...]
 
     Percentiles are calculated across ALL variants at ALL positions.
     """
     if stacked_col not in df.columns:
         return df
 
-    print(f"    Processing {stacked_col}...")
+    print(f"    Processing {stacked_col} (score_field={score_field})...")
 
     # Add row index for grouping back
     df = df.with_row_index('_row_idx')
 
     # Explode the array to get individual variants
+    # Note: explode() must be called on DataFrame, not inside select()
     exploded = df.select(
         '_row_idx',
-        pl.col(stacked_col).explode().alias('_variant')
-    ).filter(
+        pl.col(stacked_col).alias('_variant')
+    ).explode('_variant').filter(
         pl.col('_variant').is_not_null()
     )
 
@@ -130,32 +155,41 @@ def add_per_variant_percentiles(df: pl.DataFrame, stacked_col: str) -> pl.DataFr
         df = df.drop('_row_idx')
         return df
 
-    # Extract pred values and calculate percentiles
-    exploded = exploded.with_columns([
+    # Extract score values - always extract 'alt' and the score field
+    extract_exprs = [
         pl.col('_variant').struct.field('alt').alias('_alt'),
-        pl.col('_variant').struct.field('pred').alias('_pred'),
-        pl.col('_variant').struct.field('n_pred').alias('_n_pred'),
-    ])
+        pl.col('_variant').struct.field(score_field).alias('_score'),
+    ]
+    # Also extract any extra fields
+    for field in extra_fields:
+        extract_exprs.append(
+            pl.col('_variant').struct.field(field).alias(f'_{field}')
+        )
+    exploded = exploded.with_columns(extract_exprs)
 
-    # Count non-null predictions
-    total_variants = exploded.filter(pl.col('_pred').is_not_null()).height
+    # Count non-null scores
+    total_variants = exploded.filter(pl.col('_score').is_not_null()).height
     print(f"      Total variants: {total_variants:,}")
 
     if total_variants > 0:
         # Calculate percentile rank
         exploded = exploded.with_columns(
-            (pl.col('_pred').rank(method='average') / total_variants * 100)
+            (pl.col('_score').rank(method='average') / total_variants * 100)
             .alias('_percentile')
         )
 
         # Rebuild struct with percentile field
+        # Build the struct fields dynamically
+        struct_fields = [
+            pl.col('_alt').alias('alt'),
+            pl.col('_score').alias(score_field),
+        ]
+        for field in extra_fields:
+            struct_fields.append(pl.col(f'_{field}').alias(field))
+        struct_fields.append(pl.col('_percentile').alias('percentile'))
+
         exploded = exploded.with_columns(
-            pl.struct([
-                pl.col('_alt').alias('alt'),
-                pl.col('_pred').alias('pred'),
-                pl.col('_n_pred').alias('n_pred'),
-                pl.col('_percentile').alias('percentile'),
-            ]).alias('_variant_with_perc')
+            pl.struct(struct_fields).alias('_variant_with_perc')
         )
 
         # Group back by row index to recreate arrays
@@ -184,17 +218,34 @@ CROSS_NORM_STACKED_COLUMNS = {
     'ESM1b_stacked': ('score', 'ESM1b'),
 }
 
+# MTR column used as gating filter for cross-normalization
+# Sites without MTR are excluded from ALL cross-normalized percentiles
+MTR_GATING_COLUMN = 'max_RGC_MTR_MTR'
+
 
 def add_cross_norm_percentiles(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Add cross-normalized percentile to variants where ALL 5 scores are defined.
+    Add cross-normalized percentile to variants where ALL 5 scores are defined
+    AND MTR is available at that position.
 
     Cross-normalization means: for each variant (position + alt allele),
     calculate percentile only among variants that have all 5 scores.
 
+    MTR gating: Sites without MTR are excluded from cross-normalization entirely.
+    This ensures consistency - if a site isn't in MTR, it won't have cross-norm
+    percentiles for any of the other metrics either.
+
     This modifies the stacked arrays to add a 'cross_norm_perc' field.
     """
     print("\n=== Calculating Per-Variant Cross-Normalized Percentiles ===")
+
+    # Check MTR gating column
+    if MTR_GATING_COLUMN not in df.columns:
+        print(f"  WARNING: MTR gating column '{MTR_GATING_COLUMN}' not found, skipping cross-norm")
+        return df
+
+    mtr_defined_count = df.filter(pl.col(MTR_GATING_COLUMN).is_not_null()).height
+    print(f"  MTR gating: {mtr_defined_count:,} / {len(df):,} positions have MTR defined")
 
     # Check which stacked columns exist
     available_cols = {k: v for k, v in CROSS_NORM_STACKED_COLUMNS.items() if k in df.columns}
@@ -207,15 +258,22 @@ def add_cross_norm_percentiles(df: pl.DataFrame) -> pl.DataFrame:
     # Add row index for tracking
     df = df.with_row_index('_row_idx')
 
-    # Explode each stacked column and extract scores
+    # Get row indices where MTR is defined (for filtering)
+    mtr_valid_rows = df.filter(
+        pl.col(MTR_GATING_COLUMN).is_not_null()
+    ).select('_row_idx')
+
+    # Explode each stacked column and extract scores (only for MTR-valid positions)
     exploded_dfs = {}
     for col, (score_field, name) in available_cols.items():
-        print(f"  Exploding {col}...")
+        print(f"  Exploding {col} (MTR-gated)...")
         exploded = df.select(
             '_row_idx',
-            pl.col(col).explode().alias('_variant')
-        ).filter(
+            pl.col(col).alias('_variant')
+        ).explode('_variant').filter(
             pl.col('_variant').is_not_null()
+        ).join(
+            mtr_valid_rows, on='_row_idx', how='inner'  # Only keep MTR-valid positions
         )
 
         if exploded.height == 0:
@@ -246,7 +304,7 @@ def add_cross_norm_percentiles(df: pl.DataFrame) -> pl.DataFrame:
             how='inner'  # Only keep variants with ALL scores
         )
 
-    print(f"  Variants with all {len(names)} scores: {joined.height:,}")
+    print(f"  Variants with all {len(names)} scores (MTR-gated): {joined.height:,}")
 
     if joined.height == 0:
         print("  No variants have all scores defined, skipping cross-norm")
@@ -282,8 +340,8 @@ def add_cross_norm_percentiles(df: pl.DataFrame) -> pl.DataFrame:
         # Explode the array again to add cross_norm_perc
         exploded = df.select(
             '_row_idx',
-            pl.col(col).explode().alias('_variant')
-        )
+            pl.col(col).alias('_variant')
+        ).explode('_variant')
 
         # Add sequence number within each group to maintain order
         exploded = exploded.with_columns(
@@ -299,28 +357,21 @@ def add_cross_norm_percentiles(df: pl.DataFrame) -> pl.DataFrame:
         )
 
         # Rebuild struct with cross_norm_perc field
-        # Get existing fields from the struct
-        if col in ['Constraint', 'Core', 'Complete']:
-            # Prediction format: {alt, pred, n_pred, percentile}
-            exploded = exploded.with_columns(
-                pl.struct([
-                    pl.col('_variant').struct.field('alt').alias('alt'),
-                    pl.col('_variant').struct.field('pred').alias('pred'),
-                    pl.col('_variant').struct.field('n_pred').alias('n_pred'),
-                    pl.col('_variant').struct.field('percentile').alias('percentile'),
-                    pl.col(perc_col).alias('cross_norm_perc'),
-                ]).alias('_new_variant')
-            )
-        else:
-            # dbNSFP format: {alt, score, percentile}
-            exploded = exploded.with_columns(
-                pl.struct([
-                    pl.col('_variant').struct.field('alt').alias('alt'),
-                    pl.col('_variant').struct.field('score').alias('score'),
-                    pl.col('_variant').struct.field('percentile').alias('percentile'),
-                    pl.col(perc_col).alias('cross_norm_perc'),
-                ]).alias('_new_variant')
-            )
+        # Use STACKED_PRED_COLUMNS to get the correct field structure
+        pred_score_field, extra_fields = STACKED_PRED_COLUMNS.get(col, (score_field, []))
+
+        struct_fields = [
+            pl.col('_variant').struct.field('alt').alias('alt'),
+            pl.col('_variant').struct.field(pred_score_field).alias(pred_score_field),
+        ]
+        for field in extra_fields:
+            struct_fields.append(pl.col('_variant').struct.field(field).alias(field))
+        struct_fields.append(pl.col('_variant').struct.field('percentile').alias('percentile'))
+        struct_fields.append(pl.col(perc_col).alias('cross_norm_perc'))
+
+        exploded = exploded.with_columns(
+            pl.struct(struct_fields).alias('_new_variant')
+        )
 
         # Filter out nulls and group back
         grouped = exploded.filter(
@@ -334,8 +385,29 @@ def add_cross_norm_percentiles(df: pl.DataFrame) -> pl.DataFrame:
         df = df.drop(col)
         df = df.rename({f'{col}_with_xnorm': col})
 
+    # Calculate MTR cross-norm percentile (position-level)
+    # MTR percentile is calculated only among positions with all 5 predictor scores
+    print(f"  Calculating MTR cross-norm percentile...")
+    cross_norm_positions = joined.select('_row_idx').unique()
+    cross_norm_position_count = cross_norm_positions.height
+    print(f"    Cross-norm positions for MTR: {cross_norm_position_count:,}")
+
+    # Calculate MTR percentile among these positions
+    mtr_at_cross_norm = df.join(
+        cross_norm_positions, on='_row_idx', how='inner'
+    ).select('_row_idx', MTR_GATING_COLUMN)
+
+    mtr_with_perc = mtr_at_cross_norm.with_columns(
+        (pl.col(MTR_GATING_COLUMN).rank(method='average') / cross_norm_position_count * 100)
+        .alias('_mtr_cross_norm_perc')
+    ).select('_row_idx', '_mtr_cross_norm_perc')
+
+    # Join back to main dataframe
+    df = df.join(mtr_with_perc, on='_row_idx', how='left')
+    df = df.rename({'_mtr_cross_norm_perc': 'RGC_MTR_MTR_cross_norm_perc'})
+
     df = df.drop('_row_idx')
-    print(f"  Cross-normalization complete")
+    print(f"  Cross-normalization complete (including MTR)")
     return df
 
 
@@ -376,11 +448,14 @@ def main(input_path: str, output_path: str):
 
     # --- PER-VARIANT PERCENTILES FOR STACKED ARRAYS ---
     print("\n=== Calculating Per-Variant Percentiles for Stacked Arrays ===")
-    for stacked_col in STACKED_PRED_COLUMNS:
-        df = add_per_variant_percentiles(df, stacked_col)
+    for stacked_col, (score_field, extra_fields) in STACKED_PRED_COLUMNS.items():
+        df = add_per_variant_percentiles(df, stacked_col, score_field, extra_fields)
 
     # --- PER-VARIANT CROSS-NORMALIZED PERCENTILES ---
-    # This adds cross_norm_perc to variants that have ALL 5 stacked scores
+    # This adds cross_norm_perc to variants where:
+    # 1. MTR is defined at the position (gating filter)
+    # 2. ALL 5 stacked predictor scores exist (Constraint, Core, Complete, AlphaMissense, ESM1b)
+    # Also calculates MTR cross-norm percentile among positions meeting these criteria
     df = add_cross_norm_percentiles(df)
 
     # --- EXOME-WIDE PERCENTILES (ALL AT ONCE) ---

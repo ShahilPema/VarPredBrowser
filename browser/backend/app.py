@@ -583,7 +583,7 @@ async def get_protein_residues(
     gene: str,
     start: int = Query(1, ge=1, description="Start residue (1-based)"),
     end: int = Query(None, description="End residue (defaults to protein length)"),
-    filter_id: str = Query("mis_count_gt0", description="Filter ID for constraint data"),
+    filter_id: str = Query("missense_only", description="Filter ID for constraint data"),
     include_plddt: bool = Query(True, description="Include pLDDT scores"),
     include_constraints: bool = Query(True, description="Include constraint metrics"),
 ):
@@ -693,7 +693,7 @@ async def get_residue_scores(
     gene: str,
     field: str = Query(..., description="Field ID to aggregate"),
     aggregation: str = Query("max", description="Aggregation method: max, min, or mean"),
-    filter_id: str = Query("mis_count_gt0", description="Filter ID for constraint data"),
+    filter_id: str = Query("missense_only", description="Filter ID for constraint data"),
 ):
     """Get aggregated scores per residue for a specific field."""
     gene_upper = gene.upper()
@@ -959,7 +959,7 @@ async def get_plddt_scores(
 async def get_structure_residue_data(
     gene: str,
     residues: str = Query(..., description="Comma-separated list of residue numbers"),
-    filter_id: str = Query("mis_count_gt0"),
+    filter_id: str = Query("missense_only"),
 ):
     """Get combined structure and constraint data for specific residues."""
     gene_upper = gene.upper()

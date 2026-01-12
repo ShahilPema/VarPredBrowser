@@ -12,6 +12,10 @@ import requests
 import time
 from pathlib import Path
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Global session for connection pooling (reuses TCP connections)
+session = requests.Session()
 
 # Databases not included in /entry/all/ that need separate queries
 EXTRA_DATABASES = ['ssf', 'smart', 'panther']
@@ -20,23 +24,30 @@ EXTRA_DATABASES = ['ssf', 'smart', 'panther']
 VALID_DOMAIN_TYPES = {'domain', 'homologous_superfamily'}
 
 
-def fetch_from_endpoint(url, delay=0.1):
-    """Fetch domains from a single API endpoint."""
-    try:
-        response = requests.get(url, headers={'Accept': 'application/json'}, timeout=30)
+def fetch_from_endpoint(url, retries=3):
+    """Fetch domains from a single API endpoint with smart rate limiting."""
+    for attempt in range(retries):
+        try:
+            response = session.get(url, headers={'Accept': 'application/json'}, timeout=30)
 
-        if response.status_code == 200:
-            time.sleep(delay)
-            return response.json()
-        elif response.status_code == 404:
-            time.sleep(delay)
-            return {'results': []}
-        else:
-            time.sleep(delay)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                return {'results': []}
+            elif response.status_code == 429:
+                # Server is overwhelmed, wait and retry
+                wait = int(response.headers.get('Retry-After', 5))
+                time.sleep(wait)
+                continue
+            else:
+                return None
+
+        except requests.exceptions.RequestException:
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)  # Exponential backoff on connection errors
+                continue
             return None
-
-    except requests.exceptions.RequestException:
-        return None
+    return None
 
 
 def parse_domains(data, only_representative=True):
@@ -78,13 +89,13 @@ def parse_domains(data, only_representative=True):
     return domains
 
 
-def fetch_representative_domains(acc, delay=0.1):
+def fetch_representative_domains(acc):
     """Fetch representative domains for a single protein from all member databases."""
     all_domains = []
 
     # First fetch from /entry/all/ (includes cathgene3d, cdd, pfam, prints, profile, interpro)
     url_all = f"https://www.ebi.ac.uk/interpro/api/entry/all/protein/uniprot/{acc}"
-    data = fetch_from_endpoint(url_all, delay=delay)
+    data = fetch_from_endpoint(url_all)
 
     if data is None:
         return None  # Request failed
@@ -94,7 +105,7 @@ def fetch_representative_domains(acc, delay=0.1):
     # Then fetch from extra databases not included in /entry/all/
     for db in EXTRA_DATABASES:
         url_db = f"https://www.ebi.ac.uk/interpro/api/entry/{db}/protein/uniprot/{acc}"
-        data = fetch_from_endpoint(url_db, delay=delay)
+        data = fetch_from_endpoint(url_db)
 
         if data is not None:
             all_domains.extend(parse_domains(data, only_representative=True))
@@ -117,17 +128,32 @@ def main():
     proteins = list(old_cache.keys())
     print(f"Will fetch representative domains for {len(proteins)} proteins...")
     print(f"Fetching from /entry/all/ + extra databases: {EXTRA_DATABASES}")
+    print("Using parallel processing with 10 workers...")
 
     new_cache = {}
     failed = []
 
-    for acc in tqdm(proteins, desc="Fetching representative domains"):
-        domains = fetch_representative_domains(acc)
+    # Process proteins in parallel with ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit all tasks and create mapping of future -> accession
+        future_to_acc = {
+            executor.submit(fetch_representative_domains, acc): acc
+            for acc in proteins
+        }
 
-        if domains is None:
-            failed.append(acc)
-        elif domains:  # Only store if there are representative domains
-            new_cache[acc] = domains
+        # Process results as they complete
+        for future in tqdm(as_completed(future_to_acc), total=len(proteins),
+                          desc="Fetching representative domains"):
+            acc = future_to_acc[future]
+            try:
+                domains = future.result()
+                if domains is None:
+                    failed.append(acc)
+                elif domains:  # Only store if there are representative domains
+                    new_cache[acc] = domains
+            except Exception as e:
+                print(f"\nError fetching {acc}: {e}")
+                failed.append(acc)
 
     # Save new cache
     print(f"\nSaving representative domains cache to {rep_cache_path}")
