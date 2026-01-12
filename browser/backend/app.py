@@ -32,9 +32,10 @@ from .track_tree import (
 )
 
 
-# Global data cache
-axis_tables: Dict[str, pl.DataFrame] = {}
-gene_indexes: Dict[str, pl.DataFrame] = {}
+# Global data cache - uses LazyFrames for large axis tables
+axis_tables: Dict[str, pl.LazyFrame] = {}  # Lazy-loaded axis tables
+axis_paths: Dict[str, Path] = {}  # Store paths for reference
+gene_indexes: Dict[str, pl.DataFrame] = {}  # Gene indexes are small, load fully
 coord_mapper = CoordinateMapper()
 
 # Legacy - kept for compatibility
@@ -63,13 +64,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def load_data():
-    """Load axis tables and gene indexes for all filters into memory on startup."""
-    global axis_tables, gene_indexes, coord_mapper
+    """Setup lazy axis table references and load small indexes into memory on startup."""
+    global axis_tables, axis_paths, gene_indexes, coord_mapper
 
     config = get_config()
     data_dir = get_data_dir()
 
-    print(f"Loading data from {data_dir}...")
+    print(f"Setting up data from {data_dir}...")
 
     for filter_id in FILTERS.keys():
         # Try all-chromosomes file first, then fall back to chr1-specific
@@ -81,9 +82,14 @@ async def load_data():
             print(f"Warning: Axis table not found for {filter_id}")
             continue
 
-        print(f"Loading {axis_file.name}...")
-        axis_tables[filter_id] = pl.read_parquet(axis_file)
-        print(f"  Loaded {filter_id}: {len(axis_tables[filter_id]):,} positions, {len(axis_tables[filter_id].columns)} columns")
+        # Use lazy scanning instead of full load
+        print(f"Registering {axis_file.name} (lazy)...")
+        axis_tables[filter_id] = pl.scan_parquet(axis_file)
+        axis_paths[filter_id] = axis_file
+        # Get row count without loading data
+        row_count = axis_tables[filter_id].select(pl.len()).collect().item()
+        col_count = len(axis_tables[filter_id].collect_schema().names())
+        print(f"  Registered {filter_id}: {row_count:,} positions, {col_count} columns")
 
         # Load gene index
         gene_file = data_dir / f'gene_index_{filter_id}.parquet'
@@ -108,7 +114,7 @@ async def load_data():
         if coord_mapper.load_structure_metadata(structure_metadata_file):
             print(f"  Loaded structure metadata")
 
-    print(f"\nReady! Loaded {len(axis_tables)} filter(s), {len(coord_mapper.protein_maps)} protein map(s)")
+    print(f"\nReady! Registered {len(axis_tables)} filter(s) (lazy), {len(coord_mapper.protein_maps)} protein map(s)")
 
 
 # =============================================================================
@@ -132,16 +138,18 @@ async def get_filters():
     if not axis_tables:
         raise HTTPException(status_code=503, detail="Data not loaded")
 
-    return [
-        FilterInfo(
+    result = []
+    for filter_id in axis_tables.keys():
+        # Get row count from lazy frame
+        total = axis_tables[filter_id].select(pl.len()).collect().item()
+        result.append(FilterInfo(
             id=filter_id,
             name=f"{FILTERS[filter_id]['name']} (all chromosomes)",
             description=FILTERS[filter_id]['description'],
-            total_positions=len(axis_tables[filter_id]),
+            total_positions=total,
             chromosome="all"
-        )
-        for filter_id in axis_tables.keys()
-    ]
+        ))
+    return result
 
 
 @app.get("/api/track-tree")
@@ -202,16 +210,17 @@ async def get_filtered_window(
 
     axis_table = axis_tables[filter_id]
 
-    # Clamp to valid range
-    max_idx = len(axis_table) - 1
+    # Clamp to valid range (get total rows from lazy frame)
+    total_rows = axis_table.select(pl.len()).collect().item()
+    max_idx = total_rows - 1
     start = max(0, min(start, max_idx))
     end = max(start, min(end, max_idx))
 
-    # Get window
+    # Get window (filter and collect)
     window_df = axis_table.filter(
         (pl.col('filtered_idx') >= start) &
         (pl.col('filtered_idx') <= end)
-    )
+    ).collect()
 
     positions = window_df.to_dicts()
 
@@ -250,11 +259,11 @@ async def get_track_data(
     axis_table = axis_tables[filter_id]
     bigwig_dir = get_bigwig_dir()
 
-    # Get window positions
+    # Get window positions (filter and collect from lazy frame)
     window_df = axis_table.filter(
         (pl.col('filtered_idx') >= filtered_start) &
         (pl.col('filtered_idx') <= filtered_end)
-    )
+    ).collect()
 
     # Check if track_id is in axis_table
     if track_id in window_df.columns:
@@ -343,10 +352,11 @@ async def genes_in_window(
 
     axis_table = axis_tables[filter_id]
 
+    # Filter and collect from lazy frame
     window = axis_table.filter(
         (pl.col('filtered_idx') >= start) &
         (pl.col('filtered_idx') <= end)
-    )
+    ).collect()
 
     if len(window) == 0:
         return {"genes": [], "count": 0}
@@ -377,7 +387,8 @@ async def get_axis_labels(
 
     labels = []
     for filtered_idx in range(filtered_start, filtered_end, step):
-        result = axis_table.filter(pl.col('filtered_idx') == filtered_idx)
+        # Collect result from lazy frame
+        result = axis_table.filter(pl.col('filtered_idx') == filtered_idx).collect()
         if len(result) > 0:
             row = result.to_dicts()[0]
             labels.append({
@@ -448,10 +459,11 @@ async def search_position(
 
     axis_table = axis_tables[filter_id]
 
+    # Filter and collect from lazy frame
     result = axis_table.filter(
         (pl.col('chrom') == chrom) &
         (pl.col('pos') == pos)
-    )
+    ).collect()
 
     if len(result) == 0:
         return PositionSearchResult(
@@ -485,17 +497,19 @@ async def gene_aa_lookup(
 
     axis_table = axis_tables[filter_id]
 
-    if 'aa_pos' not in axis_table.columns:
+    # Check schema for column existence (works on lazy frame)
+    if 'aa_pos' not in axis_table.collect_schema().names():
         raise HTTPException(
             status_code=400,
             detail="AA position data not available in this dataset"
         )
 
+    # Filter and collect from lazy frame
     results = axis_table.filter(
         (pl.col('gene_symbol').str.to_uppercase() == gene.upper()) &
         (pl.col('aa_pos') >= aa_start) &
         (pl.col('aa_pos') <= aa_end)
-    ).sort('aa_pos')
+    ).sort('aa_pos').collect()
 
     if len(results) == 0:
         raise HTTPException(
@@ -602,9 +616,10 @@ async def get_protein_residues(
     # Get constraint data from axis table
     if filter_id in axis_tables and include_constraints:
         axis_table = axis_tables[filter_id]
+        # Filter and collect from lazy frame
         gene_data = axis_table.filter(
             pl.col('gene_symbol').str.to_uppercase() == gene_upper
-        )
+        ).collect()
         pos_to_data = {}
         for row in gene_data.to_dicts():
             pos_to_data[(row['chrom'], row['pos'])] = row
@@ -698,9 +713,10 @@ async def get_residue_scores(
         return {"gene_symbol": gene_upper, "field": field, "scores": {}, "range": [None, None]}
 
     axis_table = axis_tables[filter_id]
+    # Filter and collect from lazy frame
     gene_data = axis_table.filter(
         pl.col('gene_symbol').str.to_uppercase() == gene_upper
-    )
+    ).collect()
 
     pos_to_data = {}
     for row in gene_data.to_dicts():

@@ -1278,6 +1278,11 @@
             return trackId.includes('_perc') || trackId.includes('percentile');
         }
 
+        // Check if a track is a cross-normalized percentile (0-100 scale)
+        function isCrossNormPercentileTrack(trackId) {
+            return trackId.includes('cross_norm_perc');
+        }
+
         // Helper to add percentile versions to track tree nodes
         function addPercentileVersions(node) {
             if (node.fieldId && PERCENTILE_MAP[node.fieldId]) {
@@ -1812,16 +1817,18 @@
                 'training.train_counts.unlabelled': 'Unlabelled',
                 'training.train_counts.labelled_high_qual': 'Labelled (HQ)',
                 'training.train_counts.unlabelled_high_qual': 'Unlabelled (HQ)',
-                // dbNSFP
-                'dbnsfp.max_AlphaMissense_am_pathogenicity': 'AlphaMissense',
-                'dbnsfp.max_RGC_MTR_MTR': 'MTR',
-                'dbnsfp.max_RGC_MTR_MTRpercentile_exome': 'MTR Percentile',
-                'dbnsfp.max_Non_Neuro_CCR_resid_pctile': 'CCR',
-                'dbnsfp.max_ESM1b_score': 'ESM1b',
-                'dbnsfp.max_AlphaSync_plddt': 'pLDDT',
-                'dbnsfp.max_AlphaSync_plddt10': 'pLDDT (10)',
-                'dbnsfp.max_AlphaSync_relasa': 'RelASA',
-                'dbnsfp.max_AlphaSync_relasa10': 'RelASA (10)',
+                // dbNSFP / Comparator scores
+                'max_AlphaMissense_am_pathogenicity': 'AlphaMissense',
+                'max_RGC_MTR_MTR': 'MTR',
+                'max_Non_Neuro_CCR_resid_pctile': 'CCR',
+                'max_ESM1b_score': 'ESM1b',
+                'max_AlphaSync_plddt': 'pLDDT',
+                'max_AlphaSync_plddt10': 'pLDDT (10)',
+                'max_AlphaSync_relasa': 'RelASA',
+                'max_AlphaSync_relasa10': 'RelASA (10)',
+                // Stacked tracks
+                'AlphaMissense_stacked': 'AlphaMissense',
+                'ESM1b_stacked': 'ESM1b',
             };
             if (directMappings[trackId]) {
                 return directMappings[trackId];
@@ -1904,8 +1911,8 @@
             return trackId === 'Constraint' || trackId === 'Core' || trackId === 'Complete';
         }
 
-        // Determine if track is a dbNSFP stacked track
-        function isDbNSFPStackedTrack(trackId) {
+        // Determine if track is a pathogenicity stacked track (AlphaMissense, ESM1b)
+        function isPathogenicityStackedTrack(trackId) {
             return trackId === 'AlphaMissense_stacked' || trackId === 'ESM1b_stacked';
         }
 
@@ -2299,16 +2306,14 @@
             container.innerHTML = '';
             try {
                 // Fetch track tree from backend API
+                // Backend already provides separate Raw and Percentile sections
                 const response = await fetch(`${API_BASE}/api/track-tree`);
                 const trackTree = await response.json();
-                // Transform tree to include percentile versions for O/E tracks
-                const treeWithPercentiles = addPercentileVersions(trackTree);
-                renderTrackTree(treeWithPercentiles, container);
+                renderTrackTree(trackTree, container);
             } catch (e) {
                 console.error('Failed to load track tree:', e);
                 // Fallback to hardcoded tree if API fails
-                const treeWithPercentiles = addPercentileVersions(TRACK_TREE);
-                renderTrackTree(treeWithPercentiles, container);
+                renderTrackTree(TRACK_TREE, container);
             }
             document.getElementById('track-count').textContent = `(${selectedTracks.length} selected)`;
             updateSelectedTracksList();
@@ -2382,6 +2387,49 @@
                             // Update 3D overlay if clinvar_variants is overlayed
                             if (trackOverlayState.overlayedTracks.some(t => t.trackId === 'clinvar_variants')) {
                                 await updateTrackOverlaySpheres('clinvar_variants');
+                            }
+                        });
+                    });
+                    childrenEl.appendChild(filterContainer);
+                }
+
+                // Special handling for Variant Frequencies node - add filter checkbox
+                if (node.label === 'Variant Frequencies') {
+                    const filterContainer = document.createElement('div');
+                    filterContainer.className = 'clinvar-filter-container';
+                    filterContainer.innerHTML = `
+                        <div class="clinvar-filter-header">Display options:</div>
+                        <div class="clinvar-filter-options">
+                            <label class="clinvar-filter-option" style="border-left: 3px solid #888;">
+                                <input type="checkbox" id="show-filtered-variants" ${showFilteredVariants ? 'checked' : ''}>
+                                <span>Show filtered variants (grey)</span>
+                            </label>
+                        </div>
+                        <div class="clinvar-filter-header" style="margin-top: 8px;">Color by consequence:</div>
+                        <div class="clinvar-filter-options">
+                            ${Object.entries(CONSEQUENCE_CATEGORIES).map(([key, info]) => `
+                                <label class="clinvar-filter-option" style="border-left: 3px solid ${info.color};">
+                                    <input type="checkbox" data-consequence="${key}" ${consequenceFilter[key] ? 'checked' : ''}>
+                                    <span>${info.abbrev}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    `;
+                    filterContainer.addEventListener('click', (e) => e.stopPropagation());
+                    // Show filtered checkbox
+                    filterContainer.querySelector('#show-filtered-variants').addEventListener('change', (e) => {
+                        showFilteredVariants = e.target.checked;
+                        if (selectedTracks.some(t => isVariantFrequencyTrack(t))) {
+                            renderChart();
+                        }
+                    });
+                    // Consequence filter checkboxes
+                    filterContainer.querySelectorAll('input[data-consequence]').forEach(cb => {
+                        cb.addEventListener('change', (e) => {
+                            const key = e.target.dataset.consequence;
+                            consequenceFilter[key] = e.target.checked;
+                            if (selectedTracks.some(t => isVariantFrequencyTrack(t))) {
+                                renderChart();
                             }
                         });
                     });
@@ -2730,19 +2778,55 @@
             }
             
             // Draw domain presence/absence with new array format
+            // Grey background for no domain, colored blocks for domain regions
             drawDomains(positionsData, xScale, barWidth) {
                 this.clear();
+                const ctx = this.ctx;
                 const barHeight = this.height - 15;
+                const topPadding = 5;
 
-                positionsData.forEach((d, i) => {
+                // Domain type colors
+                const domainColors = {
+                    'homologous_superfamily': '#3498db',
+                    'family': '#9b59b6',
+                    'domain': '#e74c3c',
+                    'repeat': '#f39c12',
+                    'conserved_site': '#1abc9c',
+                    'active_site': '#e91e63',
+                    'binding_site': '#00bcd4',
+                    'default': '#00b894'
+                };
+
+                // First pass: draw grey background for all positions
+                ctx.fillStyle = '#3a3a3a';
+                positionsData.forEach((d) => {
+                    const x = xScale(d.filtered_idx);
+                    ctx.fillRect(x, topPadding, Math.ceil(Math.max(1, barWidth)) + 0.5, barHeight);
+                });
+
+                // Second pass: draw colored bars for positions with domains
+                positionsData.forEach((d) => {
                     const x = xScale(d.filtered_idx);
                     const domains = d['domains'];
 
-                    // Check if domains array exists and has entries
-                    const hasDomain = domains && Array.isArray(domains) && domains.length > 0;
+                    if (!domains || !Array.isArray(domains) || domains.length === 0) {
+                        return; // Already drew grey background
+                    }
 
-                    this.ctx.fillStyle = hasDomain ? '#00b894' : '#555555';
-                    this.ctx.fillRect(x, 5, Math.ceil(Math.max(1, barWidth)) + 0.5, barHeight);
+                    // Get unique domain types at this position
+                    const uniqueTypes = [...new Set(domains.map(dom => dom.domain_type || 'default'))];
+                    const segmentHeight = barHeight / Math.max(uniqueTypes.length, 1);
+
+                    uniqueTypes.forEach((domainType, idx) => {
+                        const color = domainColors[domainType] || domainColors['default'];
+                        ctx.fillStyle = color;
+                        ctx.fillRect(
+                            x,
+                            topPadding + idx * segmentHeight,
+                            Math.ceil(Math.max(1, barWidth)) + 0.5,
+                            segmentHeight
+                        );
+                    });
                 });
             }
 
@@ -2848,17 +2932,17 @@
                 });
             }
 
-            // Draw dbNSFP stacked bars (AlphaMissense, ESM1b)
-            drawDbNSFPStacked(variantData, xScale, colorScale, barWidth, scoreRange) {
+            // Draw pathogenicity stacked bars (AlphaMissense, ESM1b) - same as constraint but for scores
+            drawPathogenicityStacked(variantData, xScale, colorScale, barWidth, scoreRange) {
                 this.clear();
                 const ctx = this.ctx;
                 const barHeight = this.height - 15;
                 const [minScore, maxScore] = scoreRange;
 
-                // Normalize score to 0-1 range for color mapping
+                // Normalize score to 0-1 range for both color and height
                 const normalizeScore = (score) => {
                     if (minScore === maxScore) return 0.5;
-                    return (score - minScore) / (maxScore - minScore);
+                    return Math.max(0, Math.min(1, (score - minScore) / (maxScore - minScore)));
                 };
 
                 variantData.forEach((d, i) => {
@@ -2874,20 +2958,20 @@
                     // Variants are already sorted by score value (lowest to highest)
                     const variants = d.variants;
 
-                    // Scale factor: map scores to pixel height
-                    // Max expected ~3 variants, each gets equal height
+                    // Scale factor: map normalized scores to pixel height
+                    // Max expected total ~= 3.0 (3 variants * ~1.0 each)
                     const maxDisplay = 3.0;
                     const scaleFactor = barHeight / maxDisplay;
 
                     let currentY = 5 + barHeight;  // Start from bottom
 
                     variants.forEach(variant => {
-                        // Each variant gets a fixed height segment
-                        const segmentHeight = scaleFactor;
+                        // Height proportional to normalized score (like constraint predictions)
+                        const normalizedScore = normalizeScore(variant.score);
+                        const segmentHeight = normalizedScore * scaleFactor;
                         const segmentTop = currentY - segmentHeight;
 
                         // Color based on normalized score
-                        const normalizedScore = normalizeScore(variant.score);
                         ctx.fillStyle = colorScale(normalizedScore);
                         ctx.fillRect(x, segmentTop, Math.ceil(Math.max(1, barWidth)) + 0.5, segmentHeight);
 
@@ -2905,11 +2989,12 @@
             }
 
             // Draw variant frequency ellipses (gnomAD style)
+            // Colors by consequence, filtered variants are grey, alpha for overlap
             drawVariantFrequency(variantData, xScale, barWidth, trackId) {
                 this.clear();
                 const ctx = this.ctx;
                 const centerY = this.height / 2;
-                const color = COHORT_COLORS[trackId] || '#666666';
+                const cohortColor = COHORT_COLORS[trackId] || '#666666';
 
                 variantData.forEach((d, i) => {
                     const variants = d.variants || [];
@@ -2922,12 +3007,23 @@
                         return;
                     }
 
-                    variants.forEach((variant, vIdx) => {
+                    // Filter by consequence first
+                    const filteredByConsequence = variants.filter(v => {
+                        const csq = v.consequence || 'other';
+                        return consequencePassesFilter(csq);
+                    });
+
+                    filteredByConsequence.forEach((variant, vIdx) => {
                         if (!variant || variant.af === null || variant.af === undefined) return;
 
-                        // Check filter status
+                        // Check filter status (PASS vs filtered)
                         const isFiltered = variant.filters && variant.filters.length > 0;
                         if (isFiltered && !showFilteredVariants) return;
+
+                        // Get color based on consequence
+                        const csq = variant.consequence || 'other';
+                        const csqInfo = CONSEQUENCE_CATEGORIES[csq] || CONSEQUENCE_CATEGORIES['other'];
+                        const color = isFiltered ? '#888888' : csqInfo.color;
 
                         // Calculate ellipse size from AF (log scale)
                         // AF range: 1e-6 to 1, map to radius 2-15
@@ -2937,28 +3033,19 @@
                         const ry = 2 + normalizedAf * 13;  // 2 to 15
                         const rx = Math.max(1.5, barWidth / 3);
 
-                        // Offset multiple variants vertically
-                        const offsetY = (vIdx - (variants.length - 1) / 2) * (ry + 2);
-
-                        // Draw ellipse
+                        // All ellipses centered vertically - overlap shows through alpha
+                        // Draw ellipse with alpha for overlap visibility
+                        ctx.save();
+                        ctx.globalAlpha = isFiltered ? 0.4 : 0.7;
                         ctx.beginPath();
-                        ctx.ellipse(x + barWidth / 2, centerY + offsetY, rx, ry, 0, 0, 2 * Math.PI);
-
-                        if (isFiltered) {
-                            // Filtered: hollow with dashed stroke
-                            ctx.strokeStyle = color;
-                            ctx.setLineDash([2, 2]);
-                            ctx.lineWidth = 1.5;
-                            ctx.stroke();
-                            ctx.setLineDash([]);
-                        } else {
-                            // PASS: filled solid
-                            ctx.fillStyle = color;
-                            ctx.fill();
-                            ctx.strokeStyle = '#333';
-                            ctx.lineWidth = 0.5;
-                            ctx.stroke();
-                        }
+                        ctx.ellipse(x + barWidth / 2, centerY, rx, ry, 0, 0, 2 * Math.PI);
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                        ctx.globalAlpha = 1.0;
+                        ctx.strokeStyle = isFiltered ? '#666' : '#333';
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                        ctx.restore();
                     });
                 });
             }
@@ -2974,10 +3061,8 @@
                     const x = xScale(d.filtered_idx);
                     const variants = d.variants || [];
 
+                    // Skip positions without ClinVar data (no grey bars)
                     if (variants.length === 0) {
-                        // No ClinVar data - draw gray bar
-                        ctx.fillStyle = '#555555';
-                        ctx.fillRect(x, 5, Math.ceil(Math.max(1, barWidth)) + 0.5, barHeight);
                         return;
                     }
 
@@ -2986,9 +3071,8 @@
                         return clinvarLabelPassesFilter(v.significance || 'other');
                     });
 
+                    // Skip if no variants pass filter
                     if (filteredVariants.length === 0) {
-                        ctx.fillStyle = '#555555';
-                        ctx.fillRect(x, 5, Math.ceil(Math.max(1, barWidth)) + 0.5, barHeight);
                         return;
                     }
 
@@ -3242,7 +3326,7 @@
                 const isClinVar = isClinVarTrack(trackId);
                 const isTraining = isTrainingTrack(trackId);
                 const isConstraintStacked = isConstraintStackedTrack(trackId);
-                const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
+                const isPathogenicityStacked = isPathogenicityStackedTrack(trackId);
 
                 // Get values for this track
                 let values;
@@ -3287,7 +3371,7 @@
                             variants: variants
                         };
                     });
-                } else if (isDbNSFPStacked) {
+                } else if (isPathogenicityStacked) {
                     // dbNSFP stacked tracks: extract variant data with score and percentile
                     // Using new struct format: {alt, score, percentile}
                     values = positionsData.map(d => {
@@ -3331,14 +3415,20 @@
                 } else if (isVariantFrequency) {
                     // Variant frequency track: data comes from API with variants array
                     // Format: {filtered_idx, variants: [{alt, af, ac, an, filters}, ...]}
+                    // Add consequence from variant_consequences lookup
                     values = positionsData.map(d => {
                         const variantArray = d[trackId];
                         if (!variantArray || !Array.isArray(variantArray)) {
                             return { filtered_idx: d.filtered_idx, variants: [] };
                         }
+                        // Enrich variants with consequence data
+                        const enrichedVariants = variantArray.map(v => {
+                            const csq = getConsequenceForAllele(d, v.alt);
+                            return { ...v, consequence: csq || 'other' };
+                        });
                         return {
                             filtered_idx: d.filtered_idx,
-                            variants: variantArray
+                            variants: enrichedVariants
                         };
                     });
                 } else {
@@ -3368,6 +3458,7 @@
                 const isObserved = isObservedTrack(trackId);
                 const isComparator = COMPARATOR_TRACKS.has(trackId);
                 const isPercTrack = isPercentileTrack(trackId);
+                const isCrossNormPerc = isCrossNormPercentileTrack(trackId);
 
                 // Transform O/E values for non-percentile tracks: constraint score = 1 - O/E
                 // This gives: 1 = constrained (O/E≈0), 0 = neutral (O/E=1), -1 = positive selection (O/E>1)
@@ -3380,8 +3471,8 @@
                 }
 
                 // For raw O/E (now transformed), scale is -1 to 1
-                // Percentile values are 0-1, so yMax should be 1; otherwise use normal logic
-                const yMax = isPercTrack ? 1 : ((isDomain || isClinVarStacked) ? 1 : (isRawOE ? 1 : d3.max(values) || 1));
+                // Percentile values are 0-1, cross-norm percentiles are 0-100
+                const yMax = isCrossNormPerc ? 100 : (isPercTrack ? 1 : ((isDomain || isClinVarStacked) ? 1 : (isRawOE ? 1 : d3.max(values) || 1)));
                 const yMin = isRawOE ? -1 : 0;
                 const isFlipped = flippedTracks.has(trackId);
 
@@ -3397,7 +3488,7 @@
                         .range(isFlipped ? baseRange.slice().reverse() : baseRange)
                         .clamp(true);
                     legendType = 'constraint_stacked';
-                } else if (isDbNSFPStacked) {
+                } else if (isPathogenicityStacked) {
                     // dbNSFP stacked: same pathogenicity gradient as constraint
                     const baseRange = ['#488b49', '#dcdc04', '#e67e22', '#cc0000'];
                     colorScale = d3.scaleLinear()
@@ -3476,7 +3567,8 @@
                 const barWidth = width / positionsData.length;
                 
                 // Determine if this track uses height-based bars (like constraint predictions)
-                const usesHeightBars = isTraining || isCounts || isObserved || isComparator || isOE || trackId.startsWith('dbnsfp.') || isRGCSummaryTrack(trackId);
+                // Includes: training, counts, observed, comparator, O/E, max_* (AlphaSync, dbNSFP max), RGC summary
+                const usesHeightBars = isTraining || isCounts || isObserved || isComparator || isOE || trackId.startsWith('max_') || trackId.startsWith('dbnsfp.') || isRGCSummaryTrack(trackId);
 
                 console.log(`[TRACK] ${trackId}: isCounts=${isCounts}, isObserved=${isObserved}, isComparator=${isComparator}, isRGCSummary=${isRGCSummaryTrack(trackId)}, usesHeightBars=${usesHeightBars}`);
 
@@ -3488,10 +3580,10 @@
                         colorScale,
                         barWidth * currentZoomTransform.k
                     );
-                } else if (isDbNSFPStacked) {
+                } else if (isPathogenicityStacked) {
                     // Score range depends on track type
                     const scoreRange = trackId === 'AlphaMissense_stacked' ? [0, 1] : [-10, 5];
-                    trackCanvas.drawDbNSFPStacked(
+                    trackCanvas.drawPathogenicityStacked(
                         values,
                         xScaleZoomed,
                         colorScale,
@@ -3563,7 +3655,7 @@
                     isVariantFrequency,
                     isCoverage,
                     isConstraintStacked,
-                    isDbNSFPStacked,
+                    isPathogenicityStacked,
                     usesHeightBars,
                     legendType,
                     legendBins,
@@ -3759,8 +3851,8 @@
                             .attr('dominant-baseline', 'middle')
                             .text(`${legendBins[idx]}`);
                     });
-                } else {
-                    // Regular track: gradient colorbar
+                } else if (legendType !== 'variant_frequency' && legendType !== 'clinvar_variants') {
+                    // Regular track: gradient colorbar (skip for variant tracks)
                     // Use yMin for raw O/E tracks (yMin = -1), otherwise 0
                     const effectiveYMin = yMin !== undefined ? yMin : 0;
                     const colorbarScale = d3.scaleLinear()
@@ -4078,13 +4170,13 @@
                         const newBarWidth = Math.max(1, (width / positionsData.length) * event.transform.k);
                         
                         // Redraw all track canvases
-                        trackCanvases.forEach(({ canvas, trackId, values, colorScale, isClinVarStacked, isClinVarVariants, isVariantFrequency, isCoverage, isDomain, isConstraintStacked, isDbNSFPStacked, usesHeightBars, yMax, yMin }) => {
+                        trackCanvases.forEach(({ canvas, trackId, values, colorScale, isClinVarStacked, isClinVarVariants, isVariantFrequency, isCoverage, isDomain, isConstraintStacked, isPathogenicityStacked, usesHeightBars, yMax, yMin }) => {
                             // Use specialized drawing method based on track type
                             if (isConstraintStacked) {
                                 canvas.drawConstraintStacked(values, newXScale, colorScale, newBarWidth);
-                            } else if (isDbNSFPStacked) {
+                            } else if (isPathogenicityStacked) {
                                 const scoreRange = trackId === 'AlphaMissense_stacked' ? [0, 1] : [-10, 5];
-                                canvas.drawDbNSFPStacked(values, newXScale, colorScale, newBarWidth, scoreRange);
+                                canvas.drawPathogenicityStacked(values, newXScale, colorScale, newBarWidth, scoreRange);
                             } else if (isClinVarStacked) {
                                 canvas.drawClinVarStacked(positionsData, newXScale, newBarWidth);
                             } else if (isClinVarVariants) {
@@ -4251,9 +4343,11 @@
         function showTooltip(event, d, trackId, value, isDomain = false) {
             const tooltip = document.getElementById('tooltip');
             const isClinVarStacked = isClinVarStackedTrack(trackId);
+            const isClinVarVariants = isClinVarVariantsTrack(trackId);
             const isClinVar = isClinVarTrack(trackId);
             const isConstraintStacked = isConstraintStackedTrack(trackId);
-            const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
+            const isPathogenicityStacked = isPathogenicityStackedTrack(trackId);
+            const isVariantFrequency = isVariantFrequencyTrack(trackId);
 
             let tooltipContent = `
                 <div class="tooltip-title">${simplifyTrackName(trackId)}</div>
@@ -4305,7 +4399,7 @@
                 } else {
                     tooltipContent += `<div class="tooltip-row" style="color: #888;">No variant predictions</div>`;
                 }
-            } else if (isDbNSFPStacked) {
+            } else if (isPathogenicityStacked) {
                 // Show dbNSFP variant scores
                 const variants = value && value.variants ? value.variants : [];
                 const scoreName = trackId === 'AlphaMissense_stacked' ? 'AlphaMissense' : 'ESM1b';
@@ -4345,6 +4439,89 @@
                     });
                 } else {
                     tooltipContent += `<div class="tooltip-row" style="color: #888;">No variant scores</div>`;
+                }
+            } else if (isVariantFrequency) {
+                // Show variant frequency details with locus, alt, AC, AN
+                const variants = value && value.variants ? value.variants : [];
+                const cohortName = trackId === 'gnomad_exomes_variants' ? 'gnomAD Exomes' :
+                                   trackId === 'gnomad_genomes_variants' ? 'gnomAD Genomes' : 'RGC';
+
+                tooltipContent += `<div class="tooltip-row">Cohort: <span class="tooltip-value">${cohortName}</span></div>`;
+                tooltipContent += `<div class="tooltip-row">Variants at site: <span class="tooltip-value">${variants.length}</span></div>`;
+
+                if (variants.length > 0) {
+                    tooltipContent += `<div class="tooltip-row" style="margin-top: 8px; border-top: 1px solid #555; padding-top: 8px;"><strong>Variant Details:</strong></div>`;
+
+                    variants.forEach(variant => {
+                        const csq = variant.consequence || 'other';
+                        const csqInfo = CONSEQUENCE_CATEGORIES[csq] || CONSEQUENCE_CATEGORIES['other'];
+                        const isFiltered = variant.filters && variant.filters.length > 0;
+                        const filterStatus = isFiltered ? `<span style="color: #888;"> [${variant.filters.join(', ')}]</span>` : '';
+
+                        tooltipContent += `
+                            <div class="tooltip-row" style="font-size: 11px; margin-left: 8px; ${isFiltered ? 'opacity: 0.6;' : ''}">
+                                <span style="display: inline-block; width: 10px; height: 10px; background: ${isFiltered ? '#888' : csqInfo.color}; margin-right: 5px; vertical-align: middle; border: 1px solid #000;"></span>
+                                <span class="tooltip-value">${d.chrom}:${d.pos.toLocaleString()} ${variant.alt}</span>
+                                <span style="color: ${csqInfo.color}; margin-left: 4px;">(${csqInfo.abbrev})</span>
+                                ${filterStatus}
+                            </div>
+                            <div class="tooltip-row" style="font-size: 10px; margin-left: 24px; color: #aaa;">
+                                AF: ${variant.af ? variant.af.toExponential(2) : 'N/A'} |
+                                AC: ${variant.ac !== undefined ? variant.ac.toLocaleString() : 'N/A'} |
+                                AN: ${variant.an !== undefined ? variant.an.toLocaleString() : 'N/A'}
+                            </div>
+                        `;
+                    });
+                } else {
+                    tooltipContent += `<div class="tooltip-row" style="color: #888;">No variants at this position</div>`;
+                }
+            } else if (isClinVarVariants) {
+                // Show ClinVar variants with full metadata
+                const variants = value && value.variants ? value.variants : [];
+
+                tooltipContent += `<div class="tooltip-row">ClinVar Variants: <span class="tooltip-value">${variants.length}</span></div>`;
+
+                if (variants.length > 0) {
+                    tooltipContent += `<div class="tooltip-row" style="margin-top: 8px; border-top: 1px solid #555; padding-top: 8px;"><strong>Variant Details:</strong></div>`;
+
+                    variants.forEach(variant => {
+                        const sig = variant.significance || 'Unknown';
+                        const color = getClinVarColor(sig);
+                        const isFiltered = !clinvarLabelPassesFilter(sig);
+                        const csq = variant.mol_csq || '';
+                        const status = variant.status || '';
+                        const varId = variant.variation_id || '';
+
+                        // Format review status for display
+                        const reviewStars = status.includes('multiple') ? '★★★' :
+                                           status.includes('expert') ? '★★★★' :
+                                           status.includes('single') ? '★' :
+                                           status.includes('criteria') ? '★' : '';
+
+                        // Format allele change (ref>alt)
+                        const ref = variant.ref || '?';
+                        const alleleChange = `${ref}>${variant.alt}`;
+
+                        tooltipContent += `
+                            <div class="tooltip-row" style="font-size: 11px; margin-left: 8px; ${isFiltered ? 'opacity: 0.4;' : ''}">
+                                <span style="display: inline-block; width: 10px; height: 10px; background: ${color}; margin-right: 5px; vertical-align: middle; border: 1px solid #000;"></span>
+                                <span class="tooltip-value">${d.chrom}:${d.pos.toLocaleString()} ${alleleChange}</span>
+                                ${isFiltered ? '<span style="color: #888; font-size: 10px;"> (filtered)</span>' : ''}
+                            </div>
+                            <div class="tooltip-row" style="font-size: 10px; margin-left: 24px; color: #aaa;">
+                                <span style="color: ${color};">${sig.replace(/_/g, ' ')}</span>
+                                ${reviewStars ? ` ${reviewStars}` : ''}
+                            </div>
+                        `;
+                        if (csq || varId) {
+                            tooltipContent += `<div class="tooltip-row" style="font-size: 10px; margin-left: 24px; color: #666;">`;
+                            if (csq) tooltipContent += `${csq.replace(/_/g, ' ')}`;
+                            if (varId) tooltipContent += `${csq ? ' | ' : ''}VarID: ${varId}`;
+                            tooltipContent += `</div>`;
+                        }
+                    });
+                } else {
+                    tooltipContent += `<div class="tooltip-row" style="color: #888;">No ClinVar variants at this position</div>`;
                 }
             } else if (isClinVarStacked) {
                 // Show ClinVar labels
@@ -5823,10 +6000,10 @@
 
             // Check if constraint or dbNSFP stacked track
             const isConstraintStacked = isConstraintStackedTrack(trackId);
-            const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
+            const isPathogenicityStacked = isPathogenicityStackedTrack(trackId);
             const isFlipped = flippedTracks.has(trackId);
 
-            if (isConstraintStacked || isDbNSFPStacked) {
+            if (isConstraintStacked || isPathogenicityStacked) {
                 // Use pathogenicity gradient for constraint stacked tracks
                 const pathogenicityColors = [
                     '#00b894',  // benign (green)
@@ -5880,10 +6057,10 @@
             const isOE = isOETrack(trackId);
             const isVIR = trackId.toLowerCase().includes('vir');
             const isConstraintStacked = isConstraintStackedTrack(trackId);
-            const isDbNSFPStacked = isDbNSFPStackedTrack(trackId);
+            const isPathogenicityStacked = isPathogenicityStackedTrack(trackId);
             const useConstraintGradient = usesConstraintColors(trackId);
 
-            if (isConstraintStacked || isDbNSFPStacked || useConstraintGradient) {
+            if (isConstraintStacked || isPathogenicityStacked || useConstraintGradient) {
                 // Constraint predictions, counts, RGC, comparators use same custom gradient
                 // High value = red (pathogenic/constrained), low value = green (benign/tolerant)
                 const baseRange = ['#488b49', '#dcdc04', '#e67e22', '#cc0000'];

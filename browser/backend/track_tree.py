@@ -144,28 +144,24 @@ def build_gnomad_oe_tree() -> Dict[str, Any]:
 
 
 def build_coverage_tree() -> Dict[str, Any]:
-    """Build the Coverage track tree section (browser-data-refactor.md Section 2)."""
+    """Build the Coverage track tree section with all coverage thresholds."""
+    thresholds = [10, 15, 20, 25, 30, 50]
+
+    exome_children = [
+        {"label": f"Over {t}x", "fieldId": f"gnomad_exomes_over_{t}"}
+        for t in thresholds
+    ]
+
+    genome_children = [
+        {"label": f"Over {t}x", "fieldId": f"gnomad_genomes_over_{t}"}
+        for t in thresholds
+    ]
+
     return {
         "label": "Coverage",
         "children": [
-            {
-                "label": "Exomes",
-                "children": [
-                    {"label": "Mean", "fieldId": "gnomad_exomes_mean"},
-                    {"label": "Median", "fieldId": "gnomad_exomes_median"},
-                    {"label": "Over 20x", "fieldId": "gnomad_exomes_over_20"},
-                    {"label": "Over 30x", "fieldId": "gnomad_exomes_over_30"},
-                ],
-            },
-            {
-                "label": "Genomes",
-                "children": [
-                    {"label": "Mean", "fieldId": "gnomad_genomes_mean"},
-                    {"label": "Median", "fieldId": "gnomad_genomes_median"},
-                    {"label": "Over 20x", "fieldId": "gnomad_genomes_over_20"},
-                    {"label": "Over 30x", "fieldId": "gnomad_genomes_over_30"},
-                ],
-            },
+            {"label": "Exomes", "children": exome_children},
+            {"label": "Genomes", "children": genome_children},
         ],
     }
 
@@ -275,27 +271,36 @@ def build_track_tree() -> Dict[str, Any]:
                     {
                         "label": "Constraint",
                         "children": [
-                            {"label": "MTR (dbNSFP)", "fieldId": "dbnsfp.max_RGC_MTR_MTR"},
-                            {"label": "MTR Percentile", "fieldId": "dbnsfp.max_RGC_MTR_MTRpercentile_exome"},
-                            {"label": "CCR Residual Percentile", "fieldId": "dbnsfp.max_Non_Neuro_CCR_resid_pctile"},
+                            {"label": "MTR (dbNSFP)", "fieldId": "max_RGC_MTR_MTR"},
+                            {"label": "MTR Exome-Wide %ile", "fieldId": "RGC_MTR_MTR_exome_perc"},
+                            {"label": "CCR Residual Percentile", "fieldId": "max_Non_Neuro_CCR_resid_pctile"},
                         ],
                     },
                     {
                         "label": "Pathogenicity / Model Scores",
                         "children": [
-                            {"label": "AlphaMissense (max)", "fieldId": "dbnsfp.max_AlphaMissense_am_pathogenicity"},
-                            {"label": "AlphaMissense (stacked)", "fieldId": "AlphaMissense_stacked", "type": "dbnsfp_stacked"},
-                            {"label": "ESM1b (max)", "fieldId": "dbnsfp.max_ESM1b_score"},
-                            {"label": "ESM1b (stacked)", "fieldId": "ESM1b_stacked", "type": "dbnsfp_stacked"},
+                            {"label": "AlphaMissense", "fieldId": "AlphaMissense_stacked", "type": "pathogenicity_stacked"},
+                            {"label": "ESM1b", "fieldId": "ESM1b_stacked", "type": "pathogenicity_stacked"},
                         ],
                     },
                     {
                         "label": "AlphaSync",
                         "children": [
-                            {"label": "pLDDT", "fieldId": "dbnsfp.max_AlphaSync_plddt"},
-                            {"label": "pLDDT (10-window)", "fieldId": "dbnsfp.max_AlphaSync_plddt10"},
-                            {"label": "RelASA", "fieldId": "dbnsfp.max_AlphaSync_relasa"},
-                            {"label": "RelASA (10-window)", "fieldId": "dbnsfp.max_AlphaSync_relasa10"},
+                            {"label": "pLDDT", "fieldId": "max_AlphaSync_plddt"},
+                            {"label": "pLDDT (10-window)", "fieldId": "max_AlphaSync_plddt10"},
+                            {"label": "RelASA", "fieldId": "max_AlphaSync_relasa"},
+                            {"label": "RelASA (10-window)", "fieldId": "max_AlphaSync_relasa10"},
+                        ],
+                    },
+                    {
+                        "label": "Cross-Normalized %ile",
+                        "children": [
+                            {"label": "AlphaMissense", "fieldId": "AlphaMissense_am_pathogenicity_cross_norm_perc"},
+                            {"label": "ESM1b", "fieldId": "ESM1b_score_cross_norm_perc"},
+                            {"label": "MTR", "fieldId": "RGC_MTR_MTR_cross_norm_perc"},
+                            {"label": "Constraint", "fieldId": "Constraint_cross_norm_perc"},
+                            {"label": "Core", "fieldId": "Core_cross_norm_perc"},
+                            {"label": "Complete", "fieldId": "Complete_cross_norm_perc"},
                         ],
                     },
                 ],
@@ -368,16 +373,19 @@ def simplify_track_name(track_name: str) -> str:
         'training.train_counts.unlabelled': 'Unlabelled',
         'training.train_counts.labelled_high_qual': 'Labelled (HQ)',
         'training.train_counts.unlabelled_high_qual': 'Unlabelled (HQ)',
-        # dbNSFP columns
-        'dbnsfp.max_AlphaMissense_am_pathogenicity': 'AlphaMissense',
-        'dbnsfp.max_RGC_MTR_MTR': 'MTR',
-        'dbnsfp.max_RGC_MTR_MTRpercentile_exome': 'MTR Percentile',
-        'dbnsfp.max_Non_Neuro_CCR_resid_pctile': 'CCR',
-        'dbnsfp.max_ESM1b_score': 'ESM1b',
-        'dbnsfp.max_AlphaSync_plddt': 'pLDDT',
-        'dbnsfp.max_AlphaSync_plddt10': 'pLDDT (10)',
-        'dbnsfp.max_AlphaSync_relasa': 'RelASA',
-        'dbnsfp.max_AlphaSync_relasa10': 'RelASA (10)',
+        # dbNSFP columns (max aggregated values)
+        'max_AlphaMissense_am_pathogenicity': 'AlphaMissense',
+        'max_RGC_MTR_MTR': 'MTR',
+        'max_Non_Neuro_CCR_resid_pctile': 'CCR',
+        'max_ESM1b_score': 'ESM1b',
+        'max_AlphaSync_plddt': 'pLDDT',
+        'max_AlphaSync_plddt10': 'pLDDT (10)',
+        'max_AlphaSync_relasa': 'RelASA',
+        'max_AlphaSync_relasa10': 'RelASA (10)',
+        # Exome-wide percentiles
+        'AlphaMissense_am_pathogenicity_exome_perc': 'AlphaMissense (%)',
+        'ESM1b_score_exome_perc': 'ESM1b (%)',
+        'RGC_MTR_MTR_exome_perc': 'MTR (%)',
         # Stacked tracks
         'AlphaMissense_stacked': 'AlphaMissense (stacked)',
         'ESM1b_stacked': 'ESM1b (stacked)',
@@ -443,8 +451,8 @@ def categorize_track(track_name: str) -> str:
     elif track_name.startswith('training.'):
         return 'Training Labels'
 
-    # dbNSFP scores
-    elif track_name.startswith('dbnsfp.'):
+    # dbNSFP scores (max aggregated)
+    elif track_name.startswith('max_'):
         if 'alphasync' in name_lower:
             return 'AlphaSync'
         elif 'alphamissense' in name_lower:
@@ -455,10 +463,12 @@ def categorize_track(track_name: str) -> str:
             return 'Constraint'
         elif 'ccr' in name_lower:
             return 'Constraint'
-        elif '_exome_perc' in name_lower:
-            return 'Percentiles'
         else:
             return 'dbNSFP Scores'
+
+    # Exome-wide percentiles
+    elif '_exome_perc' in name_lower:
+        return 'Percentiles'
 
     # Domain annotations
     elif 'domain' in name_lower or track_name == 'domains':
