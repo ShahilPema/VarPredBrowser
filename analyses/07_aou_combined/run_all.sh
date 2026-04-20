@@ -2,8 +2,12 @@
 # Run the full 07_aou_combined pipeline on the workbench.
 #
 # Usage (typical):
+#   mkdir -p output/logs    # ensure log dir exists BEFORE nohup's redirect
 #   nohup ./run_all.sh > output/logs/pipeline.log 2>&1 &
 #   echo $! > output/logs/pipeline.pid
+#
+# (The mkdir is also done by run_all.sh once it starts, but the parent shell's
+# redirect needs the dir to exist first — there's a race otherwise.)
 #
 # Monitor:
 #   tail -f output/logs/pipeline.log              # stage transitions + summary
