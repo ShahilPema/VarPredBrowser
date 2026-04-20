@@ -86,25 +86,18 @@ def load_synonymous_slice():
 
 
 def compute_observed_for_dataset(syn_df, dataset):
-    """Replicate the per-dataset observed rule for synonymous sites."""
-    # We don't have AoU columns in the consolidated base table — so for
-    # the diagnostic step on the workbench, the caller should pass a
-    # syn_df that's already been augmented with AoU AC / pass / cov flags
-    # by 01_build_per_site.py's load_base_with_aou. To keep this script
-    # standalone, we read the per-site parquet for missense and re-load
-    # synonymous from the *augmented* base checkpoint produced by 01.
+    """Replicate the per-dataset observed rule for synonymous sites.
+
+    Mirrors 01_build_per_site.py:OBSERVED_EXPR. gnomAD's f_lowcov / f_ab_low
+    apply to all three legs and are assumed to have been pre-filtered out of
+    syn_df by main() before we get here.
+    """
     if dataset == 'gnomad_only':
-        return ((syn_df['gnomad_ac'] > 0)
-                & syn_df['gnomad_is_pass']
-                & ~syn_df['gnomad_in_table'].is_null()).cast(pl.Int32)
+        return (syn_df['gnomad_ac'] > 0).cast(pl.Int32)
     elif dataset == 'aou_only':
-        return ((syn_df['aou_ac'] > 0)
-                & syn_df['aou_is_pass']).cast(pl.Int32)
+        return (syn_df['aou_ac'] > 0).cast(pl.Int32)
     elif dataset == 'combined':
-        return (
-            (((syn_df['gnomad_ac'] > 0) & syn_df['gnomad_is_pass'])
-             | ((syn_df['aou_ac'] > 0) & syn_df['aou_is_pass']))
-        ).cast(pl.Int32)
+        return ((syn_df['gnomad_ac'] > 0) | (syn_df['aou_ac'] > 0)).cast(pl.Int32)
     raise ValueError(dataset)
 
 
@@ -261,6 +254,12 @@ def plot_mean_expected_by_percentile(score_df_by_tag, per_site_by_dataset, out_p
 
 def main():
     syn_df = load_synonymous_slice()
+
+    # gnomAD's f_lowcov + f_ab_low apply to all legs (per 01_build_per_site.py).
+    # Apply the common QC filter so k-fitting and the diagnostic plots use the
+    # same site set that the per-site parquets were built from.
+    syn_df = syn_df.filter((~pl.col('f_lowcov')) & (~pl.col('f_ab_low')))
+    log(f'  syn rows after gnomAD QC filter: {syn_df.height:,}')
 
     # k table
     log('Fitting k for each (dataset, region)...')

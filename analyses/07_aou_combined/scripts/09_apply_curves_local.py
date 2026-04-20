@@ -46,7 +46,7 @@ def log(m):
 
 
 CURVES_PATTERN = re.compile(
-    r'^curves_(?P<method>cloglog|quadprog|poisson|plm_alone)_'
+    r'^curves_(?P<method>cloglog|quadprog)_'
     r'(?P<tag>[^_]+(?:_[^_]+)*?)_'
     r'(?P<dataset>gnomad_only|aou_only|combined)\.pkl$'
 )

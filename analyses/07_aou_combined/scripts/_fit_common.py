@@ -41,8 +41,6 @@ QUADPROG_MIN_EXPECTED = 20.0
 DEFAULT_LAMBDA = {
     'cloglog':   200.0,   # 04_bernoulli_fitter / 07_cloglog_sweep.py
     'quadprog':  0.5,     # 02_poisson_quadprog_4models grid
-    'poisson':   500.0,   # 02_poisson_quadprog_4models grid
-    'plm_alone': 200.0,   # 04_bernoulli_fitter / 04_lambda_sweep_plm_alone.py
 }
 
 
@@ -64,8 +62,6 @@ def compute_fixed_window_oe(obs, exp, max_window=QUADPROG_MAX_WINDOW,
 TAGS_PER_METHOD = {
     'cloglog':   ALL_TAGS,
     'quadprog':  INHOUSE_TAGS,
-    'poisson':   INHOUSE_TAGS,
-    'plm_alone': ALL_TAGS,
 }
 
 
@@ -131,13 +127,6 @@ def _fit_chunk(method, records, lam):
                 m = F.fit_bernoulli_cloglog_irls_qp(
                     s[keep], obs[keep], exp[keep],
                     lam=lam, n_knots=N_KNOTS, sorted_universe=sorted_full)
-            elif method == 'poisson':
-                keep = exp > 0
-                if keep.sum() < MIN_VARIANTS:
-                    continue
-                m = F.fit_poisson_irls_qp(
-                    s[keep], obs[keep], exp[keep],
-                    lam=lam, n_knots=N_KNOTS, sorted_universe=sorted_full)
             elif method == 'quadprog':
                 # Records are already sorted by score in build_records; window
                 # uses cumulative sums along that axis.
@@ -147,11 +136,6 @@ def _fit_chunk(method, records, lam):
                     continue
                 m = F.fit_qp_quadprog(
                     s[valid], oe[valid], w_exp[valid],
-                    lam=lam, n_knots=N_KNOTS, sorted_universe=sorted_full)
-            elif method == 'plm_alone':
-                # No offset — fits P(observed | score). Use all sites with score.
-                m = F.fit_bernoulli_no_offset_irls_qp(
-                    s, obs,
                     lam=lam, n_knots=N_KNOTS, sorted_universe=sorted_full)
             else:
                 raise ValueError(method)
