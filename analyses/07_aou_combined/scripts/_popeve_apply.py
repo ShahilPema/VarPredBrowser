@@ -51,8 +51,12 @@ def _build_model(inducing_points):
 
 
 def _predict_chunk(chunk, seed=42):
-    """Score a chunk of (fit_dict, scores_array) pairs. Returns a list of
-    per-tx prediction dicts in chunk order."""
+    """Score a chunk of (fit_dict, scores_array, sorted_universe) triples.
+    sorted_universe is the per-tx percentile axis (rebuilt at apply time
+    from scores_df). If None, falls back to fit['sorted_train_scores'] for
+    backward compat with older pickles that bundled the universe.
+
+    Returns a list of per-tx prediction dicts in chunk order."""
     _init_worker()
     import torch
 
@@ -63,8 +67,8 @@ def _predict_chunk(chunk, seed=42):
     likelihood.eval()
 
     results = []
-    for fit, scores in chunk:
-        sorted_s = fit['sorted_train_scores']
+    for fit, scores, sorted_universe in chunk:
+        sorted_s = sorted_universe if sorted_universe is not None else fit['sorted_train_scores']
         p = scores_to_pct(scores, sorted_s)
         p = np.clip(p, 0.0, 1.0)
         x = torch.tensor(p.reshape(-1, 1), dtype=torch.float32)
@@ -86,14 +90,46 @@ def _predict_chunk(chunk, seed=42):
     return results
 
 
+def _build_universe(scores_df, score_col):
+    """Per-transcript sorted score array. Identical to compute_sorted_universe
+    in 07_fit_popeve_gp.py — duplicated here so apply doesn't need to import 07."""
+    scored = (scores_df.lazy()
+              .select(['transcript', score_col])
+              .filter(pl.col(score_col).is_not_null()))
+    agg = (scored.group_by('transcript')
+                 .agg(pl.col(score_col).sort().alias('sorted_scores'))
+                 .collect())
+    out = {}
+    for row in agg.iter_rows(named=True):
+        arr = np.asarray(row['sorted_scores'], dtype=np.float64)
+        if len(arr) >= 2:
+            out[row['transcript']] = arr
+    return out
+
+
 def apply_curves(scores_df, score_col, fits, out_path, label, n_workers):
-    """Apply pickled GP fits to scores_df, write per-variant parquet."""
+    """Apply pickled GP fits to scores_df, write per-variant parquet.
+
+    Slim pickles (no `sorted_train_scores` field) get their per-tx universe
+    rebuilt from scores_df here. Old-style pickles that include the universe
+    still work — _predict_chunk falls back to fit['sorted_train_scores'].
+    """
     df = (scores_df
           .filter(pl.col(score_col).is_not_null())
           .filter(pl.col('transcript').is_in(list(fits.keys()))))
     if df.height == 0:
         log(f'    [{label}] no rows to score')
         return
+
+    # Decide whether we need to rebuild universe: only if any fit lacks it.
+    sample_fit = next(iter(fits.values()))
+    needs_universe = 'sorted_train_scores' not in sample_fit
+    universe = None
+    if needs_universe:
+        t_u = time.perf_counter()
+        universe = _build_universe(scores_df, score_col)
+        log(f'    [{label}] rebuilt universe for {len(universe):,} txs '
+            f'in {time.perf_counter()-t_u:.1f}s (slim pickles)')
 
     t_part = time.perf_counter()
     groups = df.partition_by('transcript', maintain_order=False)
@@ -106,15 +142,16 @@ def apply_curves(scores_df, score_col, fits, out_path, label, n_workers):
         fit = fits.get(tx)
         if fit is None:
             continue
+        u = universe.get(tx) if universe is not None else None
         records.append((fit, g[score_col].to_numpy().astype(np.float64),
-                        g.select(['locus_str', 'alleles_str', 'transcript'])))
+                        g.select(['locus_str', 'alleles_str', 'transcript']), u))
     log(f'    [{label}] built {len(records)} predict records')
 
     n_chunks = min(n_workers * 2, max(1, len(records)))
     idxs = np.arange(len(records))
     chunk_indices = [idxs[i::n_chunks] for i in range(n_chunks)]
     chunk_payloads = [
-        [(records[i][0], records[i][1]) for i in ixs] for ixs in chunk_indices
+        [(records[i][0], records[i][1], records[i][3]) for i in ixs] for ixs in chunk_indices
     ]
 
     t0 = time.perf_counter()
@@ -127,7 +164,7 @@ def apply_curves(scores_df, score_col, fits, out_path, label, n_workers):
     out_frames = [None] * len(records)
     for ixs, preds in zip(chunk_indices, chunk_preds):
         for i, pred in zip(ixs, preds):
-            _fit, _sc, keys = records[i]
+            _fit, _sc, keys, _u = records[i]
             out_frames[i] = keys.with_columns([
                 pl.Series('percentile', pred['percentile']),
                 pl.Series('gp_mean',    pred['gp_mean']),
