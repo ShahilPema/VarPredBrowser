@@ -56,6 +56,22 @@ def parse_pkl(name):
     return m.group('method'), m.group('tag'), m.group('dataset')
 
 
+def _build_universe_irls(scores_df, score_col):
+    """Per-tx sorted score array — matches fitters.compute_sorted_universe."""
+    scored = (scores_df.lazy()
+              .select(['transcript', score_col])
+              .filter(pl.col(score_col).is_not_null()))
+    agg = (scored.group_by('transcript')
+                 .agg(pl.col(score_col).sort().alias('sorted_scores'))
+                 .collect())
+    out = {}
+    for row in agg.iter_rows(named=True):
+        arr = np.asarray(row['sorted_scores'], dtype=np.float64)
+        if len(arr) >= 2:
+            out[row['transcript']] = arr
+    return out
+
+
 def _apply_irls_qp(pkl_path, score_col, scores_df, fitted_path):
     """cloglog / quadprog: predict() returns fitted_oe (rate-scale O/E)."""
     log(f'Loading {pkl_path}')
@@ -64,6 +80,16 @@ def _apply_irls_qp(pkl_path, score_col, scores_df, fitted_path):
     if not models:
         log('  empty pickle; skipping')
         return
+
+    # Slim pickles don't carry per-tx sorted_train_scores; rebuild from
+    # scores_df and inject before calling F.predict.
+    sample = next(iter(models.values()))
+    universe = None
+    if 'sorted_train_scores' not in sample:
+        t_u = time.perf_counter()
+        universe = _build_universe_irls(scores_df, score_col)
+        log(f'  rebuilt universe for {len(universe):,} txs in '
+            f'{time.perf_counter()-t_u:.1f}s (slim pickle)')
 
     df = (scores_df
           .filter(pl.col(score_col).is_not_null())
@@ -79,6 +105,11 @@ def _apply_irls_qp(pkl_path, score_col, scores_df, fitted_path):
         m = models.get(tx)
         if m is None:
             continue
+        if universe is not None:
+            u = universe.get(tx)
+            if u is None:
+                continue
+            m = {**m, 'sorted_train_scores': u}
         scores = g[score_col].to_numpy().astype(np.float64)
         try:
             oe = F.predict(m, scores)
