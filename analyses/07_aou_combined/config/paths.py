@@ -1,23 +1,22 @@
 """Single-edit-point path config.
 
-Set VARPRED_07_ROOT and VARPRED_07_INPUTS env vars to retarget; defaults assume
-the workbench layout `/home/jupyter/07_aou_combined/`.
+Defaults derive ROOT from this file's own location, so the dir works
+unchanged on BCM, the AoU workbench, or anywhere else cloned. Override
+via VARPRED_07_ROOT / VARPRED_07_INPUTS env vars only if you want to
+relocate inputs/outputs out of the analysis dir.
 """
 import os
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
-# Local roots (workbench-side defaults; override per-machine via env)
+# Local roots — derived from this file's location (config/paths.py is at
+# <ROOT>/config/paths.py, so parent.parent is the analysis dir).
 # -----------------------------------------------------------------------------
 
-ROOT = Path(os.environ.get(
-    'VARPRED_07_ROOT',
-    '/storage/zoghbi/home/u235147/VarPredBrowser/analyses/07_aou_combined',
-))
-INPUTS_DIR = Path(os.environ.get(
-    'VARPRED_07_INPUTS',
-    str(ROOT / 'inputs'),
-))
+_HERE = Path(__file__).resolve().parent.parent
+
+ROOT = Path(os.environ.get('VARPRED_07_ROOT', str(_HERE)))
+INPUTS_DIR = Path(os.environ.get('VARPRED_07_INPUTS', str(ROOT / 'inputs')))
 OUTPUT_DIR = ROOT / 'output'
 PER_SITE_DIR = OUTPUT_DIR / 'per_site'
 CURVES_DIR = OUTPUT_DIR / 'curves'
