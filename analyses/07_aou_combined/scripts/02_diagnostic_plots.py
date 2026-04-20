@@ -294,8 +294,10 @@ def main():
 
     log('Loading scores from base table...')
     score_cols = list(TAG_TO_SCORE_COL.values())
+    base_path = (f'{BASE_TABLE_PARQUET}/*.parquet'
+                 if BASE_TABLE_PARQUET.is_dir() else str(BASE_TABLE_PARQUET))
     score_df = pl.read_parquet(
-        f'{BASE_TABLE_PARQUET}/*.parquet',
+        base_path,
         columns=['locus_str', 'alleles_str', 'transcript', *score_cols],
     )
     log(f'  scores: {score_df.height:,} rows')

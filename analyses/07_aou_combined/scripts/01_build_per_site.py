@@ -83,7 +83,9 @@ def build_augmented_base():
            .with_columns(pl.lit(True).alias('aou_observed')))
 
     log(f'Loading base table: {BASE_TABLE_PARQUET}')
-    base = pl.scan_parquet(f'{BASE_TABLE_PARQUET}/*.parquet')
+    base_path = (f'{BASE_TABLE_PARQUET}/*.parquet'
+                 if BASE_TABLE_PARQUET.is_dir() else str(BASE_TABLE_PARQUET))
+    base = pl.scan_parquet(base_path)
 
     log('Joining base + AoU observed (left, on locus_str + alleles_str)...')
     augmented = (base.join(aou, on=['locus_str', 'alleles_str'], how='left')

@@ -154,8 +154,10 @@ def main():
         parsed.append((p, meta))
 
     log(f'Loading score table from {BASE_TABLE_PARQUET}')
+    base_path = (f'{BASE_TABLE_PARQUET}/*.parquet'
+                 if BASE_TABLE_PARQUET.is_dir() else str(BASE_TABLE_PARQUET))
     scores_df = pl.read_parquet(
-        f'{BASE_TABLE_PARQUET}/*.parquet',
+        base_path,
         columns=['locus_str', 'alleles_str', 'transcript', *sorted(score_cols_needed)],
     )
     log(f'  scores: {scores_df.height:,} rows')

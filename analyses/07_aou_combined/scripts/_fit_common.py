@@ -77,7 +77,9 @@ def load_scores_and_universe(score_col):
     """Load (locus_str, alleles_str, transcript, score_col) from base_table and
     build {tx -> sorted_score_array} for percentile axis at predict time."""
     log(f'Loading scores ({score_col}) from base_table...')
-    df = (pl.scan_parquet(f'{BASE_TABLE_PARQUET}/*.parquet')
+    base_path = (f'{BASE_TABLE_PARQUET}/*.parquet'
+                 if BASE_TABLE_PARQUET.is_dir() else str(BASE_TABLE_PARQUET))
+    df = (pl.scan_parquet(base_path)
             .select(['locus_str', 'alleles_str', 'transcript', score_col])
             .filter(pl.col(score_col).is_not_null())
             .collect())

@@ -298,8 +298,10 @@ def main():
     # Load all 8 score columns from the consolidated base table once.
     log(f'Loading scores from {BASE_TABLE_PARQUET}')
     score_cols = [TAG_TO_SCORE_COL[t] for t, _ in ALL_MODELS]
+    base_path = (f'{BASE_TABLE_PARQUET}/*.parquet'
+                 if BASE_TABLE_PARQUET.is_dir() else str(BASE_TABLE_PARQUET))
     scores_df = pl.read_parquet(
-        f'{BASE_TABLE_PARQUET}/*.parquet',
+        base_path,
         columns=['locus_str', 'alleles_str', 'transcript', *score_cols],
     )
     log(f'  scores: {scores_df.height:,} rows')
