@@ -26,10 +26,13 @@ Per-transcript training (verbatim from popEVE's train_popEVE.py):
 
 Outputs per (dataset, score_tag):
   output/curves/curves_popeve_gp_{tag}_{dataset}.pkl      # per-tx fits
-  output/curves/fitted_popeve_gp_{tag}_{dataset}.parquet  # per-variant preds
 
-Runtime expectation on 60 vCPU (workbench standard): ~30 min per
-(score, dataset), ~12 h total for 24 fits. Run per-dataset overnight
+Per-variant predictions are NOT generated here -- they're produced at BCM
+by 09_apply_curves_local.py, which imports the GP apply path from
+_popeve_apply.py. Keeps the workbench egress small (just pickles).
+
+Runtime expectation on 80 vCPU (workbench standard): ~30 min per
+(score, dataset), ~10 h total for 9 fits. Run per-dataset overnight
 with `--datasets gnomad_only` etc.
 """
 # --- THREAD GUARDRAILS (must run before any torch / numpy import) -----------
@@ -92,39 +95,15 @@ def log(m):
 
 
 # =============================================================================
-# Per-gene percentile transform (matches fitters.py:scores_to_percentiles)
+# Worker-side fit. Helpers (_init_worker, _build_model, scores_to_pct) are
+# imported from _popeve_apply so the apply path at BCM (09_apply_curves_local.py)
+# uses the IDENTICAL model constructor — state_dicts load cleanly across both.
 # =============================================================================
 
-def scores_to_pct(x, sorted_train_scores):
-    return np.searchsorted(sorted_train_scores, x, side='right') / len(sorted_train_scores)
-
-
-# =============================================================================
-# Worker-side fit / predict. Imports torch / gpytorch LAZILY inside the worker
-# so the thread-guardrail env vars are applied before torch initializes its
-# threadpool.
-# =============================================================================
-
-def _init_worker():
-    """Set single-threaded torch in every worker process."""
-    sys.path.insert(0, str(POPEVE_REPO))
-    import torch
-    torch.set_num_threads(1)
-    try:
-        torch.set_num_interop_threads(1)
-    except RuntimeError:
-        # set_num_interop_threads can only be called once per process
-        pass
-
-
-def _build_model(inducing_points):
-    """Constructor used both at fit time (scratch) and predict time (from state).
-    Kept identical so state_dict loads cleanly."""
-    from popEVE.popEVE import GPModel, PGLikelihood  # noqa
-    model = GPModel(inducing_points=inducing_points)
-    model.covar_module.base_kernel.initialize(lengthscale=LENGTHSCALE_INIT)
-    likelihood = PGLikelihood()
-    return model, likelihood
+from _popeve_apply import (  # noqa
+    _init_worker, _build_model, scores_to_pct, M_INDUCING as _M_INDUCING_CHECK,
+)
+assert _M_INDUCING_CHECK == M_INDUCING, 'M_INDUCING mismatch with _popeve_apply'
 
 
 def _fit_one(tx, s, obs, sorted_full, seed=42):
@@ -205,55 +184,6 @@ def _fit_one(tx, s, obs, sorted_full, seed=42):
     }
 
 
-def _predict_chunk(chunk, seed=42):
-    """Score a chunk of (fit_dict, scores_array) pairs. Returns a list of
-    per-tx prediction dicts in the same order as the input chunk.
-
-    Outputs the GP posterior MEAN at each point (a single calibrated logit
-    per variant) plus its sigmoid. No posterior sampling -- we only need
-    one value per input score.
-
-    Chunked dispatch (vs per-tx) reduces joblib IPC overhead: with 18K
-    per-tx tasks the main process bottlenecks on pickling ~225KB fit
-    payloads into the dispatch queue. Chunks of ~50 tx reduce that to
-    ~360 dispatches of ~11 MB each.
-    """
-    _init_worker()
-    import torch
-
-    torch.manual_seed(seed)
-    inducing = torch.linspace(0.0, 1.0, M_INDUCING, dtype=torch.float32).unsqueeze(-1)
-    model, likelihood = _build_model(inducing)
-    model.eval()
-    likelihood.eval()
-
-    results = []
-    for fit, scores in chunk:
-        sorted_s = fit['sorted_train_scores']
-        p = scores_to_pct(scores, sorted_s)
-        p = np.clip(p, 0.0, 1.0)
-        x = torch.tensor(p.reshape(-1, 1), dtype=torch.float32)
-
-        state = torch.load(io.BytesIO(fit['state_bytes']), weights_only=True)
-        model.load_state_dict(state)
-
-        with torch.no_grad():
-            out = model(x)
-            # out.mean is the posterior marginal mean at each input.
-            # Computing it is O(N*M) -- kernel block + one matmul -- no
-            # O(N^3) Cholesky of the posterior covariance required.
-            gp_mean = out.mean.numpy().astype(np.float32)
-            mean_prob = torch.sigmoid(out.mean).numpy().astype(np.float32)
-
-        results.append({
-            'transcript': fit['transcript'],
-            'percentile': p.astype(np.float32),
-            'gp_mean': gp_mean,
-            'mean_prob': mean_prob,
-        })
-    return results
-
-
 # =============================================================================
 # Record building
 # =============================================================================
@@ -306,7 +236,8 @@ def build_records(per_site_df, scores_df, score_col, sorted_by_tx, max_tx=None):
 
 
 # =============================================================================
-# Fit + apply for a single (tag, dataset)
+# Fit for a single (tag, dataset). The apply step lives in 09_apply_curves_local.py
+# and reuses _popeve_apply.
 # =============================================================================
 
 def fit_all(records, n_workers):
@@ -321,69 +252,11 @@ def fit_all(records, n_workers):
     return {r['transcript']: r for r in results if r is not None}
 
 
-def apply_curves(scores_df, score_col, fits, out_path, label, n_workers):
-    df = (scores_df
-          .filter(pl.col(score_col).is_not_null())
-          .filter(pl.col('transcript').is_in(list(fits.keys()))))
-    if df.height == 0:
-        log(f'    [{label}] no rows to score')
-        return
-
-    t_part = time.perf_counter()
-    groups = df.partition_by('transcript', maintain_order=False)
-    log(f'    [{label}] partitioned {df.height:,} rows into '
-        f'{len(groups)} tx groups in {time.perf_counter()-t_part:.1f}s')
-
-    # Build per-tx records: (fit_dict, scores_array, keys_df)
-    records = []
-    for g in groups:
-        tx = g['transcript'][0]
-        fit = fits.get(tx)
-        if fit is None:
-            continue
-        records.append((fit, g[score_col].to_numpy().astype(np.float64),
-                        g.select(['locus_str', 'alleles_str', 'transcript'])))
-    log(f'    [{label}] built {len(records)} predict records')
-
-    # Chunk records. With 18K tx and ~180 workers we want ~2x workers in
-    # chunks so fast workers can pick up extra chunks when slower ones
-    # finish. Each chunk then carries a slab of fits + arrays (~10-20 MB)
-    # which is cheap to pickle.
-    n_chunks = min(n_workers * 2, max(1, len(records)))
-    idxs = np.arange(len(records))
-    chunk_indices = [idxs[i::n_chunks] for i in range(n_chunks)]
-    chunk_payloads = [
-        [(records[i][0], records[i][1]) for i in ixs] for ixs in chunk_indices
-    ]
-
-    t0 = time.perf_counter()
-    chunk_preds = Parallel(n_jobs=n_workers, prefer='processes', verbose=0)(
-        delayed(_predict_chunk)(payload) for payload in chunk_payloads
-    )
-    log(f'    [{label}] scored {sum(len(cp) for cp in chunk_preds)} txs '
-        f'in {time.perf_counter()-t0:.1f}s ({n_chunks} chunks)')
-
-    # Stitch: preds come back in chunk order; each chunk is in chunk_indices order.
-    out_frames = [None] * len(records)
-    for ixs, preds in zip(chunk_indices, chunk_preds):
-        for i, pred in zip(ixs, preds):
-            _fit, _sc, keys = records[i]
-            out_frames[i] = keys.with_columns([
-                pl.Series('percentile', pred['percentile']),
-                pl.Series('gp_mean',    pred['gp_mean']),
-                pl.Series('mean_prob',  pred['mean_prob']),
-            ])
-    out_df = pl.concat(out_frames)
-    out_df.write_parquet(out_path)
-    log(f'    [{label}] wrote {out_path} ({out_df.height:,} rows)')
-
-
 def run_one(dataset, tag, score_col, scores_df, per_site_df, n_workers,
             sorted_by_tx, force=False, max_tx=None, curves_suffix=''):
     curves_path = CURVES_DIR / f'curves_popeve_gp_{tag}_{dataset}{curves_suffix}.pkl'
-    fitted_path = CURVES_DIR / f'fitted_popeve_gp_{tag}_{dataset}{curves_suffix}.parquet'
-    if curves_path.exists() and fitted_path.exists() and not force:
-        log(f'  SKIP {tag} / {dataset} (outputs present)')
+    if curves_path.exists() and not force:
+        log(f'  SKIP {tag} / {dataset} (curves exist)')
         return
 
     log(f'=== popeve_gp / {tag} / {dataset} (score={score_col}) ===')
@@ -394,18 +267,10 @@ def run_one(dataset, tag, score_col, scores_df, per_site_df, n_workers,
     if not records:
         return
 
-    if not curves_path.exists() or force:
-        fits = fit_all(records, n_workers)
-        with open(curves_path, 'wb') as f:
-            pickle.dump(fits, f, protocol=pickle.HIGHEST_PROTOCOL)
-    else:
-        with open(curves_path, 'rb') as f:
-            fits = pickle.load(f)
-        log(f'  loaded cached curves ({len(fits)} txs)')
-
-    if not fitted_path.exists() or force:
-        apply_curves(scores_df, score_col, fits, str(fitted_path),
-                     f'popeve_gp/{tag}/{dataset}', n_workers)
+    fits = fit_all(records, n_workers)
+    with open(curves_path, 'wb') as f:
+        pickle.dump(fits, f, protocol=pickle.HIGHEST_PROTOCOL)
+    log(f'  wrote {curves_path}')
 
 
 def main():
