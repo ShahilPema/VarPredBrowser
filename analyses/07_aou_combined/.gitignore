@@ -1,0 +1,6 @@
+output/
+inputs/
+inputs_stage/
+*.pyc
+__pycache__/
+.ipynb_checkpoints/
