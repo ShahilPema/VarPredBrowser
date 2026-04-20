@@ -319,7 +319,7 @@ def main():
             log(f'SKIP {dataset}: per-site parquet missing ({psp})')
             continue
         log(f'Loading per_site: {psp}')
-        per_site_df = pl.read_parquet(f'{psp}/*.parquet')
+        per_site_df = pl.read_parquet(str(psp))
         log(f'  per_site: {per_site_df.height:,} rows  '
             f'(O rate: {per_site_df["observed"].mean():.4f})')
 

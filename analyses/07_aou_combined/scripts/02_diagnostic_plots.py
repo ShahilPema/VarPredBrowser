@@ -80,7 +80,7 @@ def load_synonymous_slice():
             f'(it writes the synonymous_augmented slice as a side output).'
         )
     log(f'Loading synonymous slice: {SYN_SLICE}')
-    df = pl.read_parquet(f'{SYN_SLICE}/*.parquet')
+    df = pl.read_parquet(str(SYN_SLICE))
     log(f'  syn rows: {df.height:,}')
     return df
 
@@ -289,7 +289,7 @@ def main():
         if not psp.exists():
             log(f'  SKIP {ds}: per-site missing')
             continue
-        per_site_by_dataset[ds] = pl.read_parquet(f'{psp}/*.parquet')
+        per_site_by_dataset[ds] = pl.read_parquet(str(psp))
         log(f'  {ds}: {per_site_by_dataset[ds].height:,} rows')
 
     log('Loading scores from base table...')

@@ -190,7 +190,7 @@ def run_method(method, datasets, tags, lam, n_workers, force=False):
                 continue
 
             psp = per_site_path(dataset)
-            if not (psp / '_SUCCESS').exists() and not psp.exists():
+            if not psp.exists():
                 log(f'SKIP {method}/{tag}/{dataset}: per-site missing ({psp})')
                 continue
 
@@ -198,7 +198,7 @@ def run_method(method, datasets, tags, lam, n_workers, force=False):
                 scores_df, universe = load_scores_and_universe(score_col)
 
             log(f'=== {method} / {tag} / {dataset} (lam={lam}) ===')
-            per_site_df = pl.read_parquet(f'{psp}/*.parquet')
+            per_site_df = pl.read_parquet(str(psp))
             log(f'  per_site: {per_site_df.height:,} rows')
 
             records = build_records(per_site_df, scores_df, score_col, universe)
