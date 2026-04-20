@@ -267,15 +267,22 @@ def push_to_gcs():
 
 def main():
     parts = sorted(BASE_OUT.glob('*.parquet')) if BASE_OUT.exists() else []
+    rebuilt = False
     if parts:
         log(f'Base parquet already built at {BASE_OUT} ({len(parts)} part(s)); '
             f'skipping Hail + Polars stages.')
     else:
         build_base_table_hail()
         join_external_scores()
+        rebuilt = True
 
-    if not MANIFEST_OUT.exists():
+    # ALWAYS regenerate manifest if the parquet was just (re)built. Otherwise
+    # only write if missing. This prevents a stale manifest from a prior build
+    # being shipped alongside a newer parquet.
+    if rebuilt or not MANIFEST_OUT.exists():
         write_manifest()
+    else:
+        log(f'Manifest already at {MANIFEST_OUT}; not regenerating')
 
     if '--push' in sys.argv:
         push_to_gcs()
