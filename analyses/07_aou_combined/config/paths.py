@@ -54,21 +54,21 @@ def per_site_path(dataset: str) -> Path:
 
 
 # -----------------------------------------------------------------------------
-# Score tag definitions (mirrors 04_bernoulli_fitter)
+# Score tag definitions (pared down per cohort comparison scope)
 # -----------------------------------------------------------------------------
 
-INHOUSE_TAGS = ('c_iso', 'raw', 'c_noqvd_ps', 'core_ps')
-EXTERNAL_TAGS = ('popeve_neg', 'eve_neg', 'esm1v_neg', 'alphamissense')
+# `raw`            : in-house Full_Raw_Core (best in-house performer in last eval)
+# `popeve_neg`     : external popEVE
+# `alphamissense`  : external AlphaMissense (top external in last eval)
+# Quadprog runs on in-house tags only (see TAGS_PER_METHOD in _fit_common.py),
+# so pruning to one in-house tag means quadprog now runs on just `raw`.
+INHOUSE_TAGS = ('raw',)
+EXTERNAL_TAGS = ('popeve_neg', 'alphamissense')
 ALL_TAGS = INHOUSE_TAGS + EXTERNAL_TAGS
 
 TAG_TO_SCORE_COL = {
-    'c_iso':         'score_c_iso',
     'raw':           'score_raw',
-    'c_noqvd_ps':    'score_c_noqvd_ps',
-    'core_ps':       'score_core_ps',
     'popeve_neg':    'score_popeve_neg',
-    'eve_neg':       'score_eve_neg',
-    'esm1v_neg':     'score_esm1v_neg',
     'alphamissense': 'score_alphamissense',
 }
 
