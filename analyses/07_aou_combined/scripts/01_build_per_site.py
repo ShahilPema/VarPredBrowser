@@ -4,17 +4,18 @@
 Pure Polars (no Hail / no dataproc). Reads:
   - base_table.parquet (shipped from BCM) — gnomAD AC/PASS, scores, roulette
     MR, ENST/HGNC, gnomAD-derived f_lowcov / f_ab_low.
-  - AoU VAT annotations parquet at $AOU_VAT_PARQUET — chrom/pos/ref/alt +
-    gvs_*_ac/gvs_*_an columns. VAT contains only PASS calls.
+  - AoU observed_snps parquet at $AOU_OBSERVED_PARQUET — locus.contig,
+    locus.position, alleles[]. Row presence = variant observed AND passing
+    in All of Us (no counts / no pass flag needed).
 
-Joins AoU AC onto the base table by reconstructing (locus_str, alleles_str)
-keys, then for each dataset writes per-site (locus_str, alleles_str,
-transcript, gene_symbol, observed, expected) where:
+Joins AoU observed flag onto the base table by reconstructing (locus_str,
+alleles_str) keys, then for each dataset writes per-site
+(locus_str, alleles_str, transcript, gene_symbol, observed, expected) where:
   - **gnomAD QC filters apply to ALL three datasets** (a position dropped
     by f_lowcov or f_ab_low is dropped from every leg).
   - observed:
       gnomad_only : 1 iff gnomad_ac > 0
-      aou_only    : 1 iff aou_ac    > 0
+      aou_only    : 1 iff aou_observed
       combined    : 1 iff either above
   - expected: 1 - exp(-k * roulette_AR_MR), with k fit per-(dataset, region)
     on synonymous scaling sites.
@@ -47,10 +48,12 @@ def log(msg):
 # -----------------------------------------------------------------------------
 # Inputs
 # -----------------------------------------------------------------------------
-# AoU VAT annotations parquet (workspace bucket). Set via env var on workbench.
-AOU_VAT_PARQUET = os.environ.get(
-    'AOU_VAT_PARQUET',
-    'gs://fc-secure-57a37491-77aa-498c-b0f0-2163b5feb12e/data/aou_vat_annotations.parquet/*.parquet',
+# AoU observed_snps parquet (workspace bucket). Row present => variant observed
+# AND passing in AoU; no AC / pass columns needed. Schema:
+#   locus.contig (str), locus.position (int32), alleles (list[str])
+AOU_OBSERVED_PARQUET = os.environ.get(
+    'AOU_OBSERVED_PARQUET',
+    'gs://fc-secure-57a37491-77aa-498c-b0f0-2163b5feb12e/data/observed_snps.parquet/*.parquet',
 )
 
 # Local cached AoU+gnomAD-augmented base table; built once and reused.
@@ -67,30 +70,24 @@ def build_augmented_base():
         log(f'AUGMENTED base already at {AUGMENTED_BASE}; skipping join')
         return
 
-    log(f'Loading AoU VAT: {AOU_VAT_PARQUET}')
-    aou = (pl.scan_parquet(AOU_VAT_PARQUET)
+    log(f'Loading AoU observed_snps: {AOU_OBSERVED_PARQUET}')
+    aou = (pl.scan_parquet(AOU_OBSERVED_PARQUET)
            .with_columns([
-               (pl.col('chrom') + pl.lit(':') + pl.col('pos').cast(pl.Utf8))
-                   .alias('locus_str'),
-               (pl.lit('["') + pl.col('ref') + pl.lit('","') + pl.col('alt') + pl.lit('"]'))
-                   .alias('alleles_str'),
-               pl.col('gvs_all_ac').cast(pl.Int32, strict=False).alias('aou_ac'),
+               (pl.col('locus.contig') + pl.lit(':') +
+                pl.col('locus.position').cast(pl.Utf8)).alias('locus_str'),
+               (pl.lit('["') + pl.col('alleles').list.get(0) + pl.lit('","') +
+                pl.col('alleles').list.get(1) + pl.lit('"]')).alias('alleles_str'),
            ])
-           .select(['locus_str', 'alleles_str', 'aou_ac'])
-           # AoU VAT contains only PASS calls; presence with non-null AC is enough
-           .with_columns(pl.lit(True).alias('aou_in_vat')))
+           .select(['locus_str', 'alleles_str'])
+           # Row presence => observed AND passing in AoU.
+           .with_columns(pl.lit(True).alias('aou_observed')))
 
     log(f'Loading base table: {BASE_TABLE_PARQUET}')
     base = pl.scan_parquet(f'{BASE_TABLE_PARQUET}/*.parquet')
 
-    log('Joining base + AoU VAT (left, on locus_str + alleles_str)...')
+    log('Joining base + AoU observed (left, on locus_str + alleles_str)...')
     augmented = (base.join(aou, on=['locus_str', 'alleles_str'], how='left')
-                     .with_columns([
-                         pl.col('aou_in_vat').fill_null(False),
-                         pl.col('aou_ac').fill_null(0),
-                     ])
-                     # aou_is_pass = aou_ac > 0 since VAT is PASS-only
-                     .with_columns((pl.col('aou_ac') > 0).alias('aou_is_pass')))
+                     .with_columns(pl.col('aou_observed').fill_null(False)))
 
     log(f'Sinking augmented base to {AUGMENTED_BASE}')
     augmented.sink_parquet(str(AUGMENTED_BASE), compression='zstd', compression_level=3)
@@ -112,7 +109,7 @@ def write_synonymous_slice():
         'locus_str', 'transcript', 'roulette_AR_MR',
         'is_chrX_nonPAR', 'roulette_syn_scaling_site',
         'gnomad_in_table', 'gnomad_ac', 'gnomad_is_pass',
-        'aou_in_vat', 'aou_ac', 'aou_is_pass',
+        'aou_observed',
         'f_lowcov', 'f_ab_low',
     ]
     (pl.scan_parquet(str(AUGMENTED_BASE))
@@ -164,8 +161,8 @@ COMMON_FILTER = ~pl.col('f_lowcov') & ~pl.col('f_ab_low')
 
 OBSERVED_EXPR = {
     'gnomad_only': (pl.col('gnomad_ac') > 0).cast(pl.Int32),
-    'aou_only':    (pl.col('aou_ac')    > 0).cast(pl.Int32),
-    'combined':    ((pl.col('gnomad_ac') > 0) | (pl.col('aou_ac') > 0)).cast(pl.Int32),
+    'aou_only':    pl.col('aou_observed').cast(pl.Int32),
+    'combined':    ((pl.col('gnomad_ac') > 0) | pl.col('aou_observed')).cast(pl.Int32),
 }
 
 

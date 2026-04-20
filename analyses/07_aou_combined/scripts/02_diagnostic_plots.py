@@ -95,9 +95,9 @@ def compute_observed_for_dataset(syn_df, dataset):
     if dataset == 'gnomad_only':
         return (syn_df['gnomad_ac'] > 0).cast(pl.Int32)
     elif dataset == 'aou_only':
-        return (syn_df['aou_ac'] > 0).cast(pl.Int32)
+        return syn_df['aou_observed'].cast(pl.Int32)
     elif dataset == 'combined':
-        return ((syn_df['gnomad_ac'] > 0) | (syn_df['aou_ac'] > 0)).cast(pl.Int32)
+        return ((syn_df['gnomad_ac'] > 0) | syn_df['aou_observed']).cast(pl.Int32)
     raise ValueError(dataset)
 
 
