@@ -58,10 +58,12 @@ def compute_fixed_window_oe(obs, exp, max_window=QUADPROG_MAX_WINDOW,
     oe = np.where(w_exp >= min_expected, w_obs / w_exp, np.nan)
     return oe, w_exp
 
-# Which tags each method runs on
+# Which tags each method runs on. quadprog is mathematically score-agnostic
+# (windowed-OE + monotone spline fit; knots at per-gene score quantiles), so
+# it runs on all tags same as cloglog.
 TAGS_PER_METHOD = {
     'cloglog':   ALL_TAGS,
-    'quadprog':  INHOUSE_TAGS,
+    'quadprog':  ALL_TAGS,
 }
 
 
