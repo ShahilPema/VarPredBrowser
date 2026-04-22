@@ -20,6 +20,7 @@ os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
 os.environ.setdefault('MKL_NUM_THREADS', '1')
 
 import argparse
+import gzip
 import pickle
 import re
 import sys
@@ -45,7 +46,7 @@ def log(m):
 CURVES_PATTERN = re.compile(
     r'^curves_(?P<method>cloglog|quadprog|popeve_gp)_'
     r'(?P<tag>[^_]+(?:_[^_]+)*?)_'
-    r'(?P<dataset>gnomad_only|aou_only|combined)\.pkl$'
+    r'(?P<dataset>gnomad_only|aou_only|combined)\.pkl(\.gz)?$'
 )
 
 
@@ -54,6 +55,22 @@ def parse_pkl(name):
     if not m:
         return None
     return m.group('method'), m.group('tag'), m.group('dataset')
+
+
+def _open_pickle(path: Path):
+    """Read a pickle from .pkl or .pkl.gz transparently."""
+    opener = gzip.open if str(path).endswith('.gz') else open
+    with opener(path, 'rb') as f:
+        return pickle.load(f)
+
+
+def _fitted_path_for(pkl_path: Path) -> Path:
+    """Strip .gz/.pkl, then append .parquet."""
+    name = pkl_path.name
+    if name.endswith('.gz'):
+        name = name[:-3]  # drop .gz
+    name = name.replace('curves_', 'fitted_').replace('.pkl', '.parquet')
+    return pkl_path.with_name(name)
 
 
 def _build_universe_irls(scores_df, score_col):
@@ -75,8 +92,7 @@ def _build_universe_irls(scores_df, score_col):
 def _apply_irls_qp(pkl_path, score_col, scores_df, fitted_path):
     """cloglog / quadprog: predict() returns fitted_oe (rate-scale O/E)."""
     log(f'Loading {pkl_path}')
-    with open(pkl_path, 'rb') as f:
-        models = pickle.load(f)
+    models = _open_pickle(pkl_path)
     if not models:
         log('  empty pickle; skipping')
         return
@@ -138,19 +154,16 @@ def _apply_popeve_gp(pkl_path, score_col, scores_df, fitted_path, n_workers):
     """popeve_gp: torch state_dicts -> (percentile, gp_mean, mean_prob)."""
     from _popeve_apply import apply_curves as gp_apply_curves
     log(f'Loading {pkl_path}')
-    with open(pkl_path, 'rb') as f:
-        fits = pickle.load(f)
+    fits = _open_pickle(pkl_path)
     if not fits:
         log('  empty pickle; skipping')
         return
-    label = pkl_path.stem.replace('curves_', '')
+    label = pkl_path.name.replace('.pkl.gz', '').replace('.pkl', '').replace('curves_', '')
     gp_apply_curves(scores_df, score_col, fits, str(fitted_path), label, n_workers)
 
 
 def apply_one(pkl_path, score_col, scores_df, gp_workers=8):
-    fitted_path = pkl_path.with_name(
-        pkl_path.name.replace('curves_', 'fitted_').replace('.pkl', '.parquet')
-    )
+    fitted_path = _fitted_path_for(pkl_path)
     if fitted_path.exists():
         log(f'SKIP {pkl_path.name} (fitted exists)')
         return
@@ -172,7 +185,9 @@ def main():
                          'avoid nested process pools). Default 28 to match shared-node norms.')
     args = ap.parse_args()
 
-    pkls = sorted(CURVES_DIR.glob('curves_*.pkl'))
+    # Match both .pkl and .pkl.gz; CURVES_PATTERN allows the optional .gz.
+    pkls = sorted(set(CURVES_DIR.glob('curves_*.pkl')) |
+                  set(CURVES_DIR.glob('curves_*.pkl.gz')))
     pkls = [p for p in pkls if parse_pkl(p.name) is not None]
     log(f'Found {len(pkls)} pickles total')
 
