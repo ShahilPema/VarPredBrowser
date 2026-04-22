@@ -65,6 +65,8 @@ def main():
                     help='Write plain .pkl instead of .pkl.gz')
     ap.add_argument('--compresslevel', type=int, default=9,
                     help='gzip level 1-9 (default 9, max compression)')
+    ap.add_argument('--force', action='store_true',
+                    help='Re-slim files that already exist in dst-dir')
     args = ap.parse_args()
 
     src_dir = Path(args.src_dir)
@@ -80,7 +82,14 @@ def main():
     log(f'Slimming {len(pkls)} pickles -> {dst_dir} '
         f'({"gzip level " + str(args.compresslevel) if compress else "no compression"})')
     total_in = total_out = 0
+    skipped = 0
     for src in pkls:
+        expected = dst_dir / (src.name + '.gz' if compress else src.name)
+        if expected.exists() and not args.force:
+            out_mb = expected.stat().st_size / 1024 / 1024
+            log(f'  SKIP {src.name} -> {expected.name} exists ({out_mb:.1f} MB)')
+            skipped += 1
+            continue
         in_mb = src.stat().st_size / 1024 / 1024
         out = slim_one(src, dst_dir, compress=compress,
                        compresslevel=args.compresslevel)
@@ -89,6 +98,9 @@ def main():
         total_out += out_mb
         log(f'  {src.name} -> {out.name}: {in_mb:.1f} MB -> {out_mb:.1f} MB '
             f'({100 * out_mb / in_mb:.1f}%)')
+    if skipped:
+        log(f'Skipped {skipped} file(s) already present in {dst_dir} '
+            f'(use --force to re-slim)')
 
     log(f'Total: {total_in:.0f} MB -> {total_out:.0f} MB '
         f'({100 * total_out / total_in:.1f}%)')
